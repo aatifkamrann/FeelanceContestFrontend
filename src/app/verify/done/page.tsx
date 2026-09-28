@@ -1,0 +1,116 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useQueryClient } from '@tanstack/react-query';
+import { Button } from 'primereact/button';
+import SiteHeader from '@/components/SiteHeader';
+import { refreshVerification, returnLabel, returnPath, verifyPath, type IdentityState } from '@/lib/identity';
+
+/**
+ * Where the provider sends the member back. Its webhook usually beat them
+ * here; where it did not, this page asks the provider for the verdict
+ * itself, so a member who closed the provider's tab still sees an answer
+ * — and the header's cue and every gated door read the same fact.
+ */
+export default function VerifyDonePage() {
+  const queryClient = useQueryClient();
+  const [state, setState] = useState<IdentityState | null>(null);
+  const [failed, setFailed] = useState(false);
+  // The provider's return address carries nothing of ours; the verify page
+  // kept the way back to the door the member came from.
+  const next = typeof window === 'undefined' ? null : returnPath(window.location.search);
+
+  useEffect(() => {
+    let cancelled = false;
+    refreshVerification()
+      .then(async (s) => {
+        if (cancelled) return;
+        setState(s);
+        await queryClient.invalidateQueries({ queryKey: ['me'] });
+        await queryClient.invalidateQueries({ queryKey: ['identity'] });
+        // An application's eligibility step reads the verdict too, and is
+        // where the button below usually leads.
+        await queryClient.invalidateQueries({ queryKey: ['apply'] });
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [queryClient]);
+
+  return (
+    <>
+      <SiteHeader />
+      <main className="mx-auto max-w-2xl px-4 py-8">
+        <div className="rounded-xl border border-[var(--surface-border)] bg-[var(--surface-card)] p-10 text-center">
+          {failed ? (
+            <>
+              <i className="pi pi-exclamation-triangle text-3xl text-amber-500" aria-hidden />
+              <p className="mt-3 font-medium">Your answer could not be read just now</p>
+              <p className="mt-1 text-sm text-[var(--text-color-secondary)]">
+                The provider&rsquo;s verdict reaches this portal on its own; check back in a minute, or open the
+                verify page again.
+              </p>
+              <Link href={verifyPath(next)} className="no-underline">
+                <Button label="Open the verify page" className="mt-4" outlined />
+              </Link>
+            </>
+          ) : state === null ? (
+            <p className="py-6 text-[var(--text-color-secondary)]">Reading the provider&rsquo;s answer…</p>
+          ) : state.status === 'approved' ? (
+            <>
+              <i className="pi pi-verified text-5xl text-green-700 dark:text-green-400" role="img" aria-label="Verified" />
+              <h1 className="mt-4 text-2xl font-bold">Your identity is verified</h1>
+              <p className="mt-2 text-sm text-[var(--text-color-secondary)]">
+                You will not be asked again. Your profile carries the mark from now on.
+              </p>
+              <Link href={next ?? '/'} className="no-underline">
+                <Button label={next ? returnLabel(next) : 'Continue'} icon="pi pi-arrow-right" className="mt-5" />
+              </Link>
+            </>
+          ) : state.status === 'in_review' ? (
+            <>
+              <i className="pi pi-clock text-5xl text-[var(--text-color-secondary)]" aria-hidden />
+              <h1 className="mt-4 text-2xl font-bold">The provider is reviewing it</h1>
+              <p className="mt-2 text-sm text-[var(--text-color-secondary)]">
+                A person at the provider is looking at your documents; that usually takes a few hours. You
+                will get an email when it is decided, and the doors that asked for it open then.
+              </p>
+              <Link href={next ?? '/'} className="no-underline">
+                <Button label={next ? returnLabel(next) : 'Continue'} className="mt-5" outlined />
+              </Link>
+            </>
+          ) : state.status === 'declined' ? (
+            <>
+              <i className="pi pi-times-circle text-5xl text-red-600 dark:text-red-400" aria-hidden />
+              <h1 className="mt-4 text-2xl font-bold">The verification did not pass</h1>
+              <p className="mt-2 text-sm text-[var(--text-color-secondary)]">
+                {state.note ? `The provider says: ${state.note}. ` : ''}
+                That is usually a photograph the provider could not read rather than anything about you. You
+                can try again straight away, with the same or another document.
+              </p>
+              <Link href={verifyPath(next)} className="no-underline">
+                <Button label="Try again" icon="pi pi-refresh" className="mt-5" />
+              </Link>
+            </>
+          ) : (
+            <>
+              <i className="pi pi-hourglass text-5xl text-[var(--text-color-secondary)]" aria-hidden />
+              <h1 className="mt-4 text-2xl font-bold">Not finished yet</h1>
+              <p className="mt-2 text-sm text-[var(--text-color-secondary)]">
+                The provider has not recorded an answer for this session. If you closed its page early, you can
+                pick up where you left off.
+              </p>
+              <Link href={verifyPath(next)} className="no-underline">
+                <Button label="Continue verification" icon="pi pi-id-card" className="mt-5" />
+              </Link>
+            </>
+          )}
+        </div>
+      </main>
+    </>
+  );
+}

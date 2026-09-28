@@ -1,0 +1,1327 @@
+/* PrimeReact + Tailwind cascade.
+ *
+ * PrimeReact's theme.css already wraps its component rules in
+ * `@layer primereact` itself — only the `:root` custom properties sit outside
+ * it. So this file must not add a layer of its own:
+ *
+ *   - `@import '…/theme.css' layer(primereact)` is compiled by Next into
+ *     `@media layer(primereact)`, which is not valid CSS. The browser drops
+ *     the whole theme and every var(--surface-*) resolves to nothing.
+ *   - Importing it with no layer at all is no better: the layer then gets its
+ *     position from stylesheet load order, the theme chunk loads before this
+ *     one, and Tailwind's preflight ends up outranking the theme — inputs
+ *     lose their borders and padding.
+ *
+ * What actually works is declaring the order here, up front, and letting the
+ * theme's own `@layer primereact` slot into the position named below. The
+ * theme is imported from layout.tsx *after* this file so that the browser has
+ * seen this statement first.
+ */
+
+@layer tailwind-base, primereact, tailwind-utilities;
+
+@import 'primeicons/primeicons.css';
+
+@layer tailwind-base {
+  @tailwind base;
+}
+
+@layer tailwind-utilities {
+  @tailwind components;
+  @tailwind utilities;
+}
+
+body {
+  background: var(--surface-ground);
+  color: var(--text-color);
+  font-family: var(--font-family);
+}
+
+/* --- the ground every screen stands on -----------------------------------
+ * Two soft washes of the accent the viewer or an administrator picked, on
+ * the theme's ground colour, under a faint dot grid that fades out downward:
+ * texture, not decoration. Painted by the body's own pseudo-elements and
+ * fixed to the viewport, so no page carries a backdrop of its own, nothing
+ * scrolls or repeats down a long page, and content above it needs no
+ * stacking tricks. Every colour is a theme variable, so the accent override
+ * and the light/dark choice recolour it with nothing else to maintain.
+ */
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+body::before {
+  background:
+    radial-gradient(60rem 40rem at 8% 0%, color-mix(in srgb, var(--primary-color) 22%, transparent), transparent 60%),
+    radial-gradient(50rem 36rem at 100% 100%, color-mix(in srgb, var(--primary-color) 14%, transparent), transparent 60%);
+}
+body::after {
+  background-image: radial-gradient(color-mix(in srgb, var(--text-color) 10%, transparent) 1px, transparent 1.5px);
+  background-size: 26px 26px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent 85%);
+  mask-image: linear-gradient(to bottom, #000 0%, transparent 85%);
+}
+
+/* --- the page and its footer (app/providers.tsx) ---------------------------
+ * A column at least as tall as the window: the page takes whatever height
+ * the footer leaves, so on a short page the footer sits at the foot of the
+ * window instead of halfway up it. A grid rather than a flex column, so the
+ * page's own children keep ordinary block layout — a centred `mx-auto`
+ * main in a flex column would shrink to its content. The column is
+ * minmax(0, 1fr) so a wide table scrolls inside its own box rather than
+ * widening the page.
+ */
+.wp-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* --- signed-out shell: sign in, join, forgot, reset ----------------------
+ * One frame for the four forms (components/AuthShell.tsx): the brand panel
+ * beside the card, on the ground the whole portal shares. It fills the page
+ * row of the shell above, so the form stays centred in the window with the
+ * footer's closing line beneath it rather than below the fold.
+ */
+.auth-shell {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+.auth-layout {
+  width: 100%;
+  max-width: 64rem;
+  display: grid;
+  gap: 2rem;
+  align-items: center;
+}
+.auth-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.auth-brand-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: fit-content;
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--text-color);
+}
+.auth-brand-name .pi {
+  font-size: 1.6rem;
+  color: var(--primary-color);
+}
+.auth-brand-lede {
+  margin: 0;
+  max-width: 22ch;
+  font-size: clamp(1.35rem, 1rem + 1.4vw, 1.9rem);
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+.auth-brand-points {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+  color: var(--text-color-secondary);
+}
+.auth-brand-points li {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+.auth-brand-points .pi {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.6rem;
+  font-size: 0.9rem;
+  color: var(--primary-color);
+  background: color-mix(in srgb, var(--primary-color) 12%, transparent);
+}
+.auth-card {
+  width: 100%;
+  max-width: 24rem;
+  justify-self: center;
+  padding: 2rem;
+  border: 1px solid var(--surface-border);
+  border-radius: 1rem;
+  background: var(--surface-card);
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--text-color) 6%, transparent),
+    0 24px 48px -24px color-mix(in srgb, var(--primary-color) 35%, transparent);
+  animation: auth-rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.auth-card-wide {
+  max-width: 28rem;
+}
+/* The one primary action per card gets a small lift; nothing else moves. */
+.auth-card .p-button[type="submit"]:not(:disabled) {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.auth-card .p-button[type="submit"]:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px -10px color-mix(in srgb, var(--primary-color) 60%, transparent);
+}
+@keyframes auth-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .auth-card {
+    animation: none;
+  }
+  .auth-card .p-button[type="submit"]:not(:disabled) {
+    transition: none;
+  }
+}
+/* Desktop: brand column on the left, the card on the right. */
+@media (min-width: 1024px) {
+  .auth-layout {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 28rem);
+    gap: 4rem;
+  }
+  .auth-card {
+    justify-self: end;
+  }
+}
+/* Phone: the brand panel is a one-line strip above the form, not a column. */
+@media (max-width: 1023px) {
+  .auth-brand {
+    align-items: center;
+    text-align: center;
+  }
+  .auth-brand-lede {
+    max-width: 30ch;
+    font-size: 1.1rem;
+    font-weight: 500;
+    color: var(--text-color-secondary);
+  }
+  .auth-brand-points {
+    display: none;
+  }
+}
+
+/* --- the join wizard's checklist ----------------------------------------
+ * Eight steps down the brand column (components/SignupRail.tsx), so the
+ * account reads as the first of them rather than the whole thing. The rail
+ * replaces the lede and the three points; on a phone, where a column of
+ * eight would push the form off the screen, it collapses to the one line
+ * saying where you are.
+ */
+.auth-brand-note {
+  margin: 0;
+  max-width: 34ch;
+  color: var(--text-color-secondary);
+  text-wrap: pretty;
+}
+.auth-steps {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+.auth-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  color: var(--text-color-secondary);
+}
+.auth-step-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--surface-border);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.auth-step-text {
+  display: grid;
+  gap: 0.1rem;
+  padding-top: 0.15rem;
+}
+.auth-step-label {
+  font-size: 0.9rem;
+}
+.auth-step-hint {
+  font-size: 0.8rem;
+  color: var(--text-color-secondary);
+}
+.auth-step-current {
+  color: var(--text-color);
+}
+.auth-step-current .auth-step-label {
+  font-weight: 600;
+}
+.auth-step-current .auth-step-mark {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+  background: color-mix(in srgb, var(--primary-color) 12%, transparent);
+}
+/* Done is green, not the accent: the accent is where you are, and a
+   portal whose accent is itself green would otherwise say both with one
+   colour. The same green the feed uses for an opportunity that fits. */
+.auth-step-done {
+  color: #15803d;
+}
+.auth-step-done .auth-step-mark {
+  border-color: transparent;
+  color: #fff;
+  background: #16a34a;
+}
+[data-theme="dark"] .auth-step-done {
+  color: #4ade80;
+}
+[data-theme="dark"] .auth-step-done .auth-step-mark {
+  color: #052e16;
+  background: #22c55e;
+}
+/* In the profile's guided setup a step's name is the way to that step. */
+.auth-step-pick {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 0.25rem;
+}
+.auth-step-pick:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.auth-step-pick:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+.auth-steps-summary {
+  display: none;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-color-secondary);
+}
+
+/* The portal, speaking inside a form under its own name (components/PortalNote.tsx). */
+.portal-note {
+  border: 1px solid color-mix(in srgb, var(--primary-color) 35%, transparent);
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--primary-color) 8%, transparent);
+  padding: 0.85rem 1rem;
+}
+.portal-note-name {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--primary-color);
+}
+.portal-note-body {
+  margin: 0.3rem 0 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--text-color-secondary);
+}
+.portal-note-body p {
+  margin: 0;
+}
+.portal-note-actions {
+  margin-top: 0.65rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Phone: a column of eight would push the form off the screen, so the rail
+   collapses to the one line that says where you are. */
+@media (max-width: 1023px) {
+  .auth-steps,
+  .auth-brand-note {
+    display: none;
+  }
+  .auth-steps-summary {
+    display: block;
+  }
+}
+
+/* --- the type and control scale ------------------------------------------
+ * lara sizes every control for a thumb: 16px text, 12px of padding above
+ * and below, 700-weight titles. Read at a desk it comes across as bulky,
+ * and the headings the pages set with utilities (text-3xl here, text-2xl
+ * there) never agreed with each other. One notch down across the board,
+ * and one scale for headings, held here rather than in forty className
+ * strings. These rules sit outside the layers on purpose: an unlayered
+ * rule outranks every layer, which is what lets a single h1 rule stand in
+ * for the utilities the pages still carry.
+ *
+ * The face is Instrument Sans (layout.tsx loads it into --wp-font); the
+ * theme's own :root declares Inter, and loads after this file, so the
+ * override needs the extra specificity of html[lang] to win.
+ */
+html[lang] {
+  --font-family: var(--wp-font), "Inter var", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-feature-settings: normal; /* lara's cv02/cv11 are Inter's alternates, not ours */
+  -webkit-font-smoothing: antialiased;
+}
+h1,
+h2,
+h3 {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+h1 {
+  font-size: 1.5rem;
+}
+h2 {
+  font-size: 1.125rem;
+  letter-spacing: -0.01em;
+}
+h3 {
+  font-size: 1rem;
+  letter-spacing: 0;
+}
+.p-component {
+  font-size: 0.9375rem;
+}
+.p-button {
+  padding: 0.6rem 1rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  border-radius: 0.5rem;
+}
+.p-button .p-button-icon {
+  font-size: 0.9375rem;
+}
+/* A grouped pair (Open for entry | All opportunities) meets edge to edge, so the
+   inner corners are squared and the borders share a line: with every corner
+   rounded the highlighted button read as laid over its neighbour. */
+.p-selectbutton .p-button:not(:first-child) {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: -1px;
+}
+.p-selectbutton .p-button:not(:last-child) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.p-selectbutton .p-button.p-highlight {
+  position: relative;
+  z-index: 1;
+}
+.p-button.p-button-sm {
+  padding: 0.45rem 0.8rem;
+  font-size: 0.8125rem;
+}
+.p-button.p-button-sm .p-button-icon {
+  font-size: 0.8125rem;
+}
+.p-button.p-button-icon-only {
+  width: 2.5rem;
+  padding: 0.6rem 0;
+}
+.p-button.p-button-icon-only.p-button-rounded {
+  height: 2.5rem;
+}
+.p-button.p-button-sm.p-button-icon-only {
+  width: 2.125rem;
+  padding: 0.45rem 0;
+}
+.p-inputtext,
+.p-inputtextarea {
+  padding: 0.6rem 0.75rem;
+  font-size: 0.9375rem;
+  border-radius: 0.5rem;
+}
+.p-inputtext.p-inputtext-sm {
+  padding: 0.45rem 0.65rem;
+  font-size: 0.8125rem;
+}
+.p-dropdown,
+.p-multiselect,
+.p-calendar .p-inputtext {
+  border-radius: 0.5rem;
+}
+.p-dialog .p-dialog-header .p-dialog-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.p-tag {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+/* Digits that line up: scores, amounts, dates, counts. */
+.tabular-nums,
+.p-datatable,
+time {
+  font-variant-numeric: tabular-nums;
+}
+
+/* PrimeReact 10.9 wraps a Password input in an IconField that sizes to its
+ * content, so `w-full` on the component stretched the outer box and left the
+ * input inside it short. Stretch the middle layer too; a component without
+ * w-full is unaffected, because 100% of a shrink-to-fit parent is itself.
+ */
+.p-password > .p-icon-field {
+  width: 100%;
+}
+
+/* A dialog on a phone otherwise runs edge to edge; a margin either side
+ * keeps it reading as a dialog over the page. Wider screens never reach
+ * the limit — the stock auto width sits well inside it. */
+.p-dialog {
+  max-width: calc(100vw - 2rem);
+}
+
+/* The close button of a dialog (ConfirmDialog too) and of a side sheet: the
+ * same X as a dropdown's clear cross, in the same 0.925rem box, grey at rest
+ * and the accent while pointed at or reached by keyboard. Lara's round 2rem
+ * button, its hover wash and its focus ring stay.
+ */
+.p-dialog .p-dialog-header .p-dialog-header-icon,
+.p-sidebar .p-sidebar-header .p-sidebar-icon {
+  color: var(--text-color-secondary);
+}
+.p-dialog .p-dialog-header .p-dialog-header-icon:enabled:hover,
+.p-dialog .p-dialog-header .p-dialog-header-icon:focus-visible,
+.p-sidebar .p-sidebar-header .p-sidebar-icon:enabled:hover,
+.p-sidebar .p-sidebar-header .p-sidebar-icon:focus-visible {
+  color: var(--primary-color);
+}
+.p-dialog .p-dialog-header .p-dialog-header-icon > .p-icon,
+.p-sidebar .p-sidebar-header .p-sidebar-icon > .p-icon {
+  width: 0.925rem;
+  height: 0.925rem;
+}
+/* HelpIcon's question mark beside a label: the magnifier's size (the
+ * circle fills its em the same way), grey at rest and the accent while
+ * pointed at, reached by keyboard or while its popup is open.
+ */
+.wp-help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-left: 0.25rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-color-secondary);
+  vertical-align: middle;
+  cursor: pointer;
+  transition: color 0.15s, box-shadow 0.15s;
+}
+.wp-help-icon > .pi {
+  font-size: 0.9375rem;
+}
+.wp-help-icon:hover,
+.wp-help-icon:focus-visible,
+.wp-help-icon[aria-expanded="true"] {
+  color: var(--primary-color);
+}
+.wp-help-icon:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+}
+/* The mark at the head of a note or a status line (an info mark, a fit
+ * verdict): the question mark's size (these circles fill their em too)
+ * and grey. Its box is a text-sm line tall, so it centres on the first
+ * line inline or in a flex row. In a note written in a warning colour,
+ * wp-keep-tone lets it take that colour.
+ */
+.wp-note-icon {
+  font-size: 0.9375rem;
+  line-height: 1.25rem;
+  vertical-align: top;
+  color: var(--text-color-secondary);
+}
+.wp-note-icon.wp-keep-tone {
+  color: inherit;
+}
+/* The help popup's close (an OverlayPanel with showCloseIcon; HelpIcon is
+ * the only one): the same X and button as a dialog's, moved from Lara's
+ * accent disc hanging off the corner to inside it, centred on the first
+ * line of text (content padding 1.25rem + half a 1.25rem line - half the
+ * button). HelpIcon keeps that first line clear of it.
+ */
+.p-overlaypanel .p-overlaypanel-close {
+  top: 0.875rem;
+  right: 0.75rem;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-color-secondary);
+}
+.p-overlaypanel .p-overlaypanel-close:enabled:hover,
+.p-overlaypanel .p-overlaypanel-close:focus-visible {
+  color: var(--primary-color);
+}
+/* The dialog close's hover wash, as Lara's themes write it. */
+.p-overlaypanel .p-overlaypanel-close:enabled:hover {
+  background: #f3f4f6;
+}
+html[data-theme="dark"] .p-overlaypanel .p-overlaypanel-close:enabled:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.p-overlaypanel .p-overlaypanel-close > .p-icon {
+  width: 0.925rem;
+  height: 0.925rem;
+}
+/* A toast's close: the same X, grey rather than the message's severity
+ * colour, the accent while pointed at or reached by keyboard. Lara's round
+ * 2rem button, its see-through hover wash and its focus ring stay.
+ */
+.p-toast .p-toast-message .p-toast-icon-close {
+  color: var(--text-color-secondary);
+}
+.p-toast .p-toast-message .p-toast-icon-close:hover,
+.p-toast .p-toast-message .p-toast-icon-close:focus-visible {
+  color: var(--primary-color);
+}
+.p-toast .p-toast-message .p-toast-icon-close > .p-icon {
+  width: 0.925rem;
+  height: 0.925rem;
+}
+
+/* --- the date field (every PrimeReact Calendar) ----------------------------
+ * A calendar mark inside the field, at the right edge and centred where a
+ * dropdown's chevron sits (1.5rem in, past the border), so in a column of
+ * filters it lines up under the chevrons above it; the secondary text colour
+ * at rest, the accent while the field is in use. The wrapper draws it
+ * rather than a button (Calendar's showIcon attaches a separate button
+ * beside the field), so a click on it falls through to the input and opens
+ * the calendar like a click anywhere else in the field. The "/ ''" gives it
+ * no spoken text; a browser that does not know that form keeps the plain
+ * declaration above it.
+ */
+.p-calendar:not(.p-calendar-w-btn):not(.p-calendar-timeonly)::before {
+  content: "\e927";
+  content: "\e927" / "";
+  position: absolute;
+  top: 50%;
+  right: calc(1.5rem + 1px);
+  z-index: 1;
+  transform: translate(50%, -50%);
+  font-family: "primeicons";
+  font-size: 0.9375rem;
+  font-style: normal;
+  font-weight: normal;
+  line-height: 1;
+  color: var(--text-color-secondary);
+  pointer-events: none;
+  -webkit-font-smoothing: antialiased;
+  transition: color 0.15s;
+}
+.p-calendar:not(.p-calendar-w-btn):not(.p-calendar-timeonly) > .p-inputtext {
+  padding-right: 2.5rem;
+}
+.p-calendar.p-focus:not(.p-calendar-w-btn):not(.p-calendar-timeonly)::before {
+  color: var(--primary-color);
+}
+.p-calendar.p-calendar-disabled:not(.p-calendar-w-btn):not(.p-calendar-timeonly)::before {
+  opacity: 0.6;
+}
+/* The dropdown and multiselect chevrons at the calendar mark's size, so a
+   column of filters reads as one set of marks: the mark draws 12.6px wide,
+   the chevron 13.65px wide in its 16px (1rem) box, so the box shrinks to
+   1rem × 12.6 / 13.65. Same centre, since the trigger centres it. */
+.p-dropdown .p-dropdown-trigger .p-dropdown-trigger-icon,
+.p-multiselect .p-multiselect-trigger .p-multiselect-trigger-icon {
+  width: 0.925rem;
+  height: 0.925rem;
+}
+/* And the same colour change: grey at rest, the accent while the field is
+   focused or its list is open (PrimeReact's p-inputwrapper-focus covers
+   both), as the calendar mark does. */
+.p-dropdown .p-dropdown-trigger,
+.p-multiselect .p-multiselect-trigger {
+  transition: color 0.15s;
+}
+.p-dropdown.p-inputwrapper-focus .p-dropdown-trigger,
+.p-multiselect.p-inputwrapper-focus .p-multiselect-trigger {
+  color: var(--primary-color);
+}
+/* The clear cross (showClear) beside the chevron: the same icon family and
+   so the same box, 0.925rem, recentred; grey at rest and the accent while
+   the field is in use, as the chevron beside it. Its label keeps room for
+   it — lara reserves 1.75rem, but the .p-inputtext padding above outranks
+   that on a dropdown's label, and the cross sat on the last letters. */
+.p-dropdown .p-dropdown-clear-icon,
+.p-multiselect .p-multiselect-clear-icon {
+  width: 0.925rem;
+  height: 0.925rem;
+  margin-top: calc(0.925rem / -2);
+  color: var(--text-color-secondary);
+  transition: color 0.15s;
+}
+.p-dropdown.p-inputwrapper-focus .p-dropdown-clear-icon,
+.p-multiselect.p-inputwrapper-focus .p-multiselect-clear-icon {
+  color: var(--primary-color);
+}
+.p-dropdown.p-dropdown-clearable .p-dropdown-label,
+.p-multiselect.p-multiselect-clearable .p-multiselect-label {
+  padding-right: calc(0.925rem + 0.75rem);
+}
+/* Every checkbox (a form's ticks, a multiselect's rows and select-all) joins
+   the set: the chevron's 0.925rem box, outlined in the icons' grey at about
+   their stroke weight, the accent outline while pointed at or reached by
+   keyboard, and the accent fill once ticked. lara's 22px box with a pale 2px
+   border read as a different control beside the 15px marks.
+   The box sits centred in a frame one text-sm line tall (1.25rem), so it
+   lines up with a label's first line whether the row aligns to the top or
+   the centre; the invisible input reaches past the box to about 23 x 24px,
+   so the target stays as easy to hit as lara's. */
+.p-checkbox {
+  width: 0.925rem;
+  height: 1.25rem;
+  align-items: center;
+}
+.p-checkbox .p-checkbox-input {
+  inset: -0.125rem -0.25rem;
+  width: auto;
+  height: auto;
+}
+/* The outline is an inset shadow, not a border: a 1.5px border is rounded
+   down to one device pixel at 125% scaling (0.8px, lighter than the icons'
+   strokes), and a shadow keeps the fractional weight. Its colour rides
+   --wp-check-ring so the states below change only that. */
+.p-checkbox .p-checkbox-box {
+  width: 0.925rem;
+  height: 0.925rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--wp-check-ring, var(--text-color-secondary));
+  transition: background-color 0.15s, box-shadow 0.15s;
+}
+.p-checkbox .p-checkbox-box .p-checkbox-icon.p-icon {
+  width: 0.625rem;
+  height: 0.625rem;
+}
+.p-multiselect-panel .p-multiselect-item:not(.p-disabled):hover .p-checkbox-box,
+.p-multiselect-panel .p-multiselect-item.p-focus .p-checkbox-box,
+.p-checkbox:not(.p-disabled):has(.p-checkbox-input:hover) .p-checkbox-box,
+.p-checkbox:not(.p-disabled):has(.p-checkbox-input:focus-visible) .p-checkbox-box,
+.p-checkbox.p-highlight .p-checkbox-box {
+  --wp-check-ring: var(--primary-color);
+}
+.p-checkbox.p-highlight .p-checkbox-box {
+  background: var(--primary-color);
+}
+.p-checkbox.p-highlight .p-checkbox-box .p-checkbox-icon {
+  color: var(--primary-color-text);
+}
+/* The keyboard keeps lara's focus ring, outside the outline. */
+.p-checkbox:not(.p-disabled):has(.p-checkbox-input:focus-visible) .p-checkbox-box {
+  box-shadow:
+    inset 0 0 0 1.5px var(--wp-check-ring),
+    var(--focus-ring);
+}
+/* lara's invalid red, per theme, now on the outline. */
+.p-checkbox.p-invalid .p-checkbox-box {
+  --wp-check-ring: #e24c4c;
+}
+html[data-theme="dark"] .p-checkbox.p-invalid .p-checkbox-box {
+  --wp-check-ring: #fca5a5;
+}
+/* Sized to the checkbox, so the row's centring lines it up with the label;
+   as a block it stood a line of text tall with the box at its foot. */
+.p-multiselect-panel .p-multiselect-checkbox {
+  display: flex;
+}
+/* Radio buttons, the checkbox's round twin: the same 0.925rem circle in a
+   1.25rem frame (level with a text-sm label's first line), the same inset
+   1.5px outline and states, the same widened target; ticked, it fills
+   with the accent around a white dot scaled from lara's (12 of 22px). */
+.p-radiobutton {
+  width: 0.925rem;
+  height: 1.25rem;
+  align-items: center;
+}
+.p-radiobutton .p-radiobutton-input {
+  inset: -0.125rem -0.25rem;
+  width: auto;
+  height: auto;
+}
+.p-radiobutton .p-radiobutton-box {
+  width: 0.925rem;
+  height: 0.925rem;
+  border: 0;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--wp-check-ring, var(--text-color-secondary));
+  transition: background-color 0.15s, box-shadow 0.15s;
+}
+.p-radiobutton .p-radiobutton-box .p-radiobutton-icon {
+  width: 0.4rem;
+  height: 0.4rem;
+  background-color: var(--primary-color-text);
+}
+.p-radiobutton:not(.p-disabled):has(.p-radiobutton-input:hover) .p-radiobutton-box,
+.p-radiobutton:not(.p-disabled):has(.p-radiobutton-input:focus-visible) .p-radiobutton-box,
+.p-radiobutton.p-highlight .p-radiobutton-box {
+  --wp-check-ring: var(--primary-color);
+}
+.p-radiobutton.p-highlight .p-radiobutton-box {
+  background: var(--primary-color);
+}
+.p-radiobutton:not(.p-disabled):has(.p-radiobutton-input:focus-visible) .p-radiobutton-box {
+  box-shadow:
+    inset 0 0 0 1.5px var(--wp-check-ring),
+    var(--focus-ring);
+}
+.p-radiobutton.p-invalid .p-radiobutton-box {
+  --wp-check-ring: #e24c4c;
+}
+html[data-theme="dark"] .p-radiobutton.p-invalid .p-radiobutton-box {
+  --wp-check-ring: #fca5a5;
+}
+/* Toggle switches, in the checkbox's terms: a track as tall as its box
+   (0.925rem) and 1.625rem long (lara's 3 : 1.75), centred in the same
+   1.25rem frame. Off, the inset 1.5px outline and the knob are the icons'
+   grey; pointed at or keyboard-focused, both turn the accent; on, the
+   track fills with the accent under a white knob. The input reaches past
+   the frame to about 30 x 24px. lara's was a 3rem pill beside 15px marks. */
+.p-inputswitch {
+  width: 1.625rem;
+  height: 1.25rem;
+  --wp-switch-pad: 0.1875rem;
+  --wp-switch-knob: calc(0.925rem - 2 * var(--wp-switch-pad));
+}
+.p-inputswitch .p-inputswitch-input {
+  inset: -0.125rem -0.125rem;
+  width: auto;
+  height: auto;
+}
+.p-inputswitch .p-inputswitch-slider {
+  top: 50%;
+  bottom: auto;
+  height: 0.925rem;
+  margin-top: calc(0.925rem / -2);
+  border: 0;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--wp-check-ring, var(--text-color-secondary));
+  transition: background-color 0.15s, box-shadow 0.15s;
+}
+.p-inputswitch .p-inputswitch-slider:before {
+  left: var(--wp-switch-pad);
+  width: var(--wp-switch-knob);
+  height: var(--wp-switch-knob);
+  margin-top: calc(var(--wp-switch-knob) / -2);
+  background: var(--wp-check-ring, var(--text-color-secondary));
+  transition: transform 0.15s, background-color 0.15s;
+}
+.p-inputswitch:not(.p-disabled):has(.p-inputswitch-input:hover) .p-inputswitch-slider,
+.p-inputswitch:not(.p-disabled):has(.p-inputswitch-input:focus-visible) .p-inputswitch-slider,
+.p-inputswitch.p-highlight .p-inputswitch-slider {
+  --wp-check-ring: var(--primary-color);
+}
+.p-inputswitch.p-highlight .p-inputswitch-slider {
+  background: var(--primary-color);
+}
+.p-inputswitch.p-highlight .p-inputswitch-slider:before {
+  background: var(--primary-color-text);
+  transform: translateX(calc(1.625rem - var(--wp-switch-knob) - 2 * var(--wp-switch-pad)));
+}
+.p-inputswitch:not(.p-disabled):has(.p-inputswitch-input:focus-visible) .p-inputswitch-slider {
+  box-shadow:
+    inset 0 0 0 1.5px var(--wp-check-ring),
+    var(--focus-ring);
+}
+.p-inputswitch.p-invalid .p-inputswitch-slider {
+  --wp-check-ring: #e24c4c;
+}
+html[data-theme="dark"] .p-inputswitch.p-invalid .p-inputswitch-slider {
+  --wp-check-ring: #fca5a5;
+}
+/* The password eye (toggleMask): the chevron's icon family and box, centred
+   where the calendar mark sits, grey at rest and the accent while the field
+   or the eye itself has focus. The input stops short of it — lara's 2.5rem
+   was lost to the .p-inputtext padding above, as the dropdown label's was. */
+.p-password .p-icon-field-right > .p-input-icon {
+  right: calc(1.5rem + 1px);
+  width: 0.925rem;
+  height: 0.925rem;
+  margin-top: calc(0.925rem / -2);
+  transform: translateX(50%);
+  line-height: 0;
+  color: var(--text-color-secondary);
+  transition: color 0.15s;
+}
+.p-password .p-icon-field-right > .p-input-icon > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.p-password:focus-within .p-icon-field-right > .p-input-icon {
+  color: var(--primary-color);
+}
+.p-password .p-icon-field-right > .p-inputtext {
+  padding-right: 2.5rem;
+}
+/* The search magnifier at the calendar mark's font size. Both are
+   primeicons glyphs a full em tall (the magnifier as wide, the calendar
+   0.84em), so the same size draws them the same height: 15px, down from
+   the theme's 16px. Two shapes carry it: PrimeReact's IconField, whose
+   centring margin assumes a 1rem icon, and the pages' own icon placed just
+   before the input (centred by a translate, and swapped for the spinner
+   while the opportunity feed searches). */
+.p-icon-field > .p-input-icon.pi,
+i.pi:has(+ .p-inputtext) {
+  font-size: 0.9375rem;
+}
+.p-icon-field > .p-input-icon.pi {
+  margin-top: calc(0.9375rem / -2);
+}
+/* And, like the calendar mark and the chevrons, the accent while the field
+   is in use. The icon comes before the input, so it asks the input. */
+.p-icon-field > .p-input-icon.pi,
+i.pi:has(+ .p-inputtext) {
+  transition: color 0.15s;
+}
+.p-icon-field > .p-input-icon.pi:has(~ .p-inputtext:focus),
+i.pi:has(+ .p-inputtext:focus) {
+  color: var(--primary-color);
+}
+/* The clear X in those same search boxes (a Button with wp-search-clear
+ * after the InputText, shown once something is typed): the dropdown clear
+ * cross's size (pi-times fills 0.785em as TimesIcon fills its box, so
+ * 0.925rem draws the same 11.6px), centred where a chevron sits. Grey at
+ * rest, the accent while the field is in use, pointed at or reached by
+ * keyboard, like the magnifier across from it. A round 2rem button keeps
+ * the target; the input's 2.5rem right padding already clears it.
+ */
+.p-button.p-button-icon-only.wp-search-clear {
+  position: absolute;
+  top: 50%;
+  right: calc(1.5rem + 1px);
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border-radius: 50%;
+  transform: translate(50%, -50%);
+  color: var(--text-color-secondary);
+}
+.p-button.p-button-icon-only.wp-search-clear .p-button-icon {
+  font-size: 0.925rem;
+}
+.p-inputtext:focus ~ .p-button.wp-search-clear,
+.p-button.p-button-icon-only.wp-search-clear:enabled:hover,
+.p-button.p-button-icon-only.wp-search-clear:focus-visible {
+  color: var(--primary-color);
+}
+/* A filter chip (the Activity screen's visitor filter): a button that
+ * clears the filter it names, so it reads like a filled-in search box in
+ * small — a leading mark at the magnifier's size, the clear X at the
+ * search clear's, both grey at rest and the accent (with the outline) while
+ * pointed at or reached by keyboard. Neutral, not a coloured Tag, because a
+ * grey mark cannot sit on a filled chip.
+ */
+.wp-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  height: 2rem;
+  padding: 0 0.5rem 0 0.625rem;
+  border: 1px solid var(--surface-border);
+  border-radius: 999px;
+  background: var(--surface-card);
+  color: var(--text-color);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.wp-filter-chip > .pi {
+  color: var(--text-color-secondary);
+  font-size: 0.9375rem;
+  transition: color 0.15s;
+}
+.wp-filter-chip > .pi-times {
+  font-size: 0.925rem;
+}
+.wp-filter-chip:hover,
+.wp-filter-chip:focus-visible {
+  border-color: var(--primary-color);
+}
+.wp-filter-chip:hover > .pi,
+.wp-filter-chip:focus-visible > .pi {
+  color: var(--primary-color);
+}
+.wp-filter-chip:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+}
+
+/* --- the calendar popup (every PrimeReact Calendar) -------------------------
+ * Stock, the popup was as wide as its input — PrimeReact writes the input's
+ * width into the panel's inline min-width, and a month picker's inline width
+ * — and lara sized each day for a thumb (2.5rem plus 0.5rem of padding), so
+ * a date field in a wide form opened a calendar across half the screen.
+ * One compact size instead, whatever the field: a 17.5rem card with the
+ * month and year at the top left, the arrows at the right, days at 2rem,
+ * the time on one row (‹ 14 › : ‹ 30 ›) and Today / Clear as small text
+ * buttons. The width and min-width need !important to beat the inline
+ * styles; every colour is a theme variable, so dark mode and the accent
+ * override apply with nothing else to maintain.
+ */
+.p-datepicker:not(.p-datepicker-inline):not(.p-datepicker-touch-ui) {
+  width: 17.5rem !important;
+  min-width: 0 !important;
+  max-width: calc(100vw - 1rem);
+  padding: 0.75rem;
+  background: var(--surface-overlay);
+  color: var(--text-color);
+  border: 1px solid var(--surface-border);
+  border-radius: 0.75rem;
+  box-shadow:
+    0 12px 32px -8px rgb(0 0 0 / 0.18),
+    0 2px 6px rgb(0 0 0 / 0.06);
+}
+.p-datepicker {
+  --wp-range-band: color-mix(in srgb, var(--primary-color) 14%, transparent);
+}
+.p-datepicker .p-datepicker-header,
+.p-datepicker:not(.p-datepicker-inline) .p-datepicker-header {
+  gap: 0.125rem;
+  padding: 0 0 0.5rem;
+  background: transparent;
+  color: var(--text-color);
+  border-bottom: 0;
+}
+.p-datepicker .p-datepicker-header .p-datepicker-title {
+  order: -1;
+  margin: 0 auto 0 -0.375rem;
+  line-height: 1.75rem;
+  font-size: 0.875rem;
+}
+.p-datepicker .p-datepicker-header .p-datepicker-title .p-datepicker-month,
+.p-datepicker .p-datepicker-header .p-datepicker-title .p-datepicker-year,
+.p-datepicker .p-datepicker-header .p-datepicker-title .p-datepicker-decade {
+  margin: 0;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.375rem;
+  color: var(--text-color);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.p-datepicker .p-datepicker-header .p-datepicker-title .p-datepicker-month:enabled:hover,
+.p-datepicker .p-datepicker-header .p-datepicker-title .p-datepicker-year:enabled:hover {
+  color: var(--text-color);
+  background: var(--surface-hover);
+}
+/* The month arrows, like the time arrows below: the dropdown chevron's
+   0.925rem box, grey at rest and the accent while pointed at. */
+.p-datepicker .p-datepicker-header .p-datepicker-prev,
+.p-datepicker .p-datepicker-header .p-datepicker-next {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.375rem;
+  color: var(--text-color-secondary);
+  transition: color 0.15s, background-color 0.15s;
+}
+.p-datepicker .p-datepicker-header .p-datepicker-prev:enabled:hover,
+.p-datepicker .p-datepicker-header .p-datepicker-next:enabled:hover {
+  color: var(--primary-color);
+  background: var(--surface-hover);
+}
+.p-datepicker .p-datepicker-prev-icon,
+.p-datepicker .p-datepicker-next-icon {
+  width: 0.925rem;
+  height: 0.925rem;
+}
+.p-datepicker table {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+.p-datepicker table th {
+  padding: 0 0 0.25rem;
+}
+.p-datepicker table th > span {
+  width: auto;
+  height: 1.5rem;
+  color: var(--text-color-secondary);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+/* No side padding, so a range's band runs cell to cell; the band is clipped
+   to the content box, which leaves a hairline between weeks. */
+.p-datepicker table td {
+  padding: 1px 0;
+  background-clip: content-box;
+}
+.p-datepicker table td > span {
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  border-radius: 0.5rem;
+  color: var(--text-color);
+  font-weight: 500;
+  transition: background-color 0.15s, color 0.15s;
+}
+.p-datepicker table td.p-datepicker-other-month > span {
+  color: var(--text-color-secondary);
+}
+.p-datepicker table td > span.p-disabled {
+  opacity: 0.35;
+}
+/* Today: the accent and a dot, not a grey disc that reads as a selection. */
+.p-datepicker table td.p-datepicker-today > span {
+  background: transparent;
+  color: var(--primary-color);
+  font-weight: 700;
+}
+.p-datepicker table td.p-datepicker-today > span::after {
+  content: "";
+  position: absolute;
+  bottom: 0.25rem;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.p-datepicker table td > span:not(.p-highlight):not(.p-disabled):hover {
+  background: var(--surface-hover);
+}
+.p-datepicker table td > span.p-highlight,
+.p-datepicker table td.p-datepicker-today > span.p-highlight {
+  background: var(--primary-color);
+  color: var(--primary-color-text);
+  font-weight: 600;
+}
+/* The ring is for the keyboard only: a month picker moves focus to January
+   as it opens, and lara's ring on every :focus then read as a selection. */
+.p-datepicker table td > span:focus,
+.p-datepicker:not(.p-disabled) table td span:not(.p-highlight):not(.p-disabled):focus,
+.p-datepicker:not(.p-disabled) .p-monthpicker .p-monthpicker-month:not(.p-disabled):focus,
+.p-datepicker:not(.p-disabled) .p-yearpicker .p-yearpicker-year:not(.p-disabled):focus {
+  box-shadow: none;
+}
+.p-datepicker table td > span:focus-visible,
+.p-datepicker:not(.p-disabled) table td span:not(.p-highlight):not(.p-disabled):focus-visible,
+.p-datepicker:not(.p-disabled) .p-monthpicker .p-monthpicker-month:not(.p-disabled):focus-visible,
+.p-datepicker:not(.p-disabled) .p-yearpicker .p-yearpicker-year:not(.p-disabled):focus-visible {
+  box-shadow:
+    0 0 0 2px var(--surface-overlay),
+    0 0 0 4px var(--primary-color);
+}
+/* A range (the reports' "between" filters): PrimeReact highlights every day
+   from the first to the last alike, so the in-between ones are told apart
+   here by their neighbours — a highlighted day on both sides, counting the
+   week's last day as the next week's first's neighbour. They sit on a band;
+   the two ends keep the solid mark, with half a band toward the other end. */
+.p-datepicker table td:has(> span.p-highlight):has(+ td > span.p-highlight) {
+  background-image: linear-gradient(90deg, transparent 50%, var(--wp-range-band) 50%);
+}
+.p-datepicker table td:has(> span.p-highlight) + td:has(> span.p-highlight) {
+  background-image: linear-gradient(90deg, var(--wp-range-band) 50%, transparent 50%);
+}
+.p-datepicker table td:has(> span.p-highlight) + td:has(> span.p-highlight):has(+ td > span.p-highlight),
+.p-datepicker table tr:has(> td:last-child > span.p-highlight) + tr > td:first-child:has(> span.p-highlight):has(+ td > span.p-highlight),
+.p-datepicker table tr:has(+ tr > td:first-child > span.p-highlight) > td:has(> span.p-highlight) + td:last-child:has(> span.p-highlight) {
+  background-image: none;
+  background-color: var(--wp-range-band);
+}
+.p-datepicker table td:has(> span.p-highlight) + td:has(> span.p-highlight):has(+ td > span.p-highlight) > span,
+.p-datepicker table tr:has(> td:last-child > span.p-highlight) + tr > td:first-child:has(> span.p-highlight):has(+ td > span.p-highlight) > span,
+.p-datepicker table tr:has(+ tr > td:first-child > span.p-highlight) > td:has(> span.p-highlight) + td:last-child:has(> span.p-highlight) > span {
+  background: transparent;
+  color: var(--text-color);
+  font-weight: 500;
+}
+/* The time, on one row: decrease on the left, increase on the right. The
+   stock up and down chevrons are turned a quarter to point that way. */
+.p-datepicker .p-timepicker {
+  justify-content: flex-start;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+  padding: 0.5rem 0 0;
+  border-top: 1px solid var(--surface-border);
+}
+.p-datepicker .p-timepicker::before {
+  content: "Time";
+  margin-right: auto;
+  color: var(--text-color-secondary);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+.p-datepicker.p-datepicker-timeonly .p-timepicker {
+  margin-top: 0;
+  padding-top: 0;
+}
+.p-datepicker .p-timepicker > div {
+  flex-direction: row;
+  padding: 0;
+}
+.p-datepicker .p-timepicker > div > button:first-child {
+  order: 2;
+}
+.p-datepicker .p-timepicker > div > button:last-child {
+  order: 0;
+  margin-top: 0;
+}
+.p-datepicker .p-timepicker > div > span {
+  order: 1;
+}
+/* The arrows are the dropdown chevron's icon family, so they take its
+   0.925rem box, grey at rest and the accent while pointed at, as the field
+   icons are while their field is in use. */
+.p-datepicker .p-timepicker button {
+  width: 1.5rem;
+  height: 1.75rem;
+  border-radius: 0.375rem;
+  color: var(--text-color-secondary);
+  transition: color 0.15s, background-color 0.15s;
+}
+.p-datepicker .p-timepicker button:enabled:hover {
+  color: var(--primary-color);
+  background: var(--surface-hover);
+}
+.p-datepicker .p-timepicker button svg {
+  width: 0.925rem;
+  height: 0.925rem;
+  transform: rotate(90deg);
+}
+.p-datepicker .p-timepicker span {
+  min-width: 1.5rem;
+  text-align: center;
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.p-datepicker .p-timepicker .p-separator span {
+  min-width: 0;
+  color: var(--text-color-secondary);
+}
+.p-datepicker .p-datepicker-buttonbar {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0 0;
+  border-top: 1px solid var(--surface-border);
+}
+.p-datepicker .p-datepicker-buttonbar .p-button {
+  padding: 0.3rem 0.55rem;
+  font-size: 0.8125rem;
+  border-radius: 0.375rem;
+}
+/* Month and year grids: three to a row, in the same card. */
+.p-datepicker .p-monthpicker,
+.p-datepicker .p-yearpicker {
+  margin: 0;
+  font-size: 0.8125rem;
+}
+.p-datepicker .p-monthpicker .p-monthpicker-month,
+.p-datepicker .p-yearpicker .p-yearpicker-year {
+  margin: 1px 0;
+  padding: 0.5rem 0;
+  border-radius: 0.5rem;
+  color: var(--text-color);
+  font-weight: 500;
+}
+.p-datepicker .p-yearpicker .p-yearpicker-year {
+  width: 33.3%;
+}
+.p-datepicker .p-monthpicker .p-monthpicker-month:not(.p-highlight):not(.p-disabled):hover,
+.p-datepicker .p-yearpicker .p-yearpicker-year:not(.p-highlight):not(.p-disabled):hover {
+  background: var(--surface-hover);
+}
+.p-datepicker .p-monthpicker .p-monthpicker-month.p-highlight,
+.p-datepicker .p-yearpicker .p-yearpicker-year.p-highlight {
+  background: var(--primary-color);
+  color: var(--primary-color-text);
+  font-weight: 600;
+}
+.p-datepicker .p-monthpicker .p-monthpicker-month.p-disabled,
+.p-datepicker .p-yearpicker .p-yearpicker-year.p-disabled {
+  opacity: 0.35;
+}
+
+/* The stock badge colour per opportunity status, with the text colour that
+   reads on it. lib/theme.ts injects the viewer's own set over these (see
+   STATUS_DEFAULTS there — keep the two in step). Outside the layers on
+   purpose: custom properties, not rules, so nothing outranks them. */
+:root {
+  --wp-status-draft: #64748b;
+  --wp-status-draft-text: #ffffff;
+  --wp-status-open: #047857;
+  --wp-status-open-text: #ffffff;
+  --wp-status-reviewing: #f59e0b;
+  --wp-status-reviewing-text: #0b1120;
+  --wp-status-awarded: #2563eb;
+  --wp-status-awarded-text: #ffffff;
+  --wp-status-cancelled: #e11d48;
+  --wp-status-cancelled-text: #ffffff;
+}
+
+/* --- the side rail (components/SideNav.tsx) --------------------------------
+ * On screens wide enough, the page menus sit in a fixed column down the left
+ * edge and the body keeps that column's width clear; folded, the column is
+ * icons only. Width lives in one variable, keyed off classes on <html> that
+ * the layout's inline script sets before first paint, so a remembered fold
+ * never jumps after hydration. Below the breakpoint the rail is hidden and
+ * the header's own row of links takes over.
+ */
+:root {
+  --wp-rail-w: 0px;
+}
+/* On paper there is no rail: a report prints from the page's edge. */
+@media print {
+  html.wp-rail body {
+    padding-left: 0 !important;
+  }
+}
+@media (min-width: 768px) {
+  html.wp-rail {
+    /* Wide enough for a real portal name beside a real logo: at 14rem
+       "Astrik Winners Portal" lost its last three characters once the
+       trophy became a 32px mark. */
+    --wp-rail-w: 15rem;
+  }
+  html.wp-rail.wp-rail-collapsed {
+    --wp-rail-w: 3.75rem;
+  }
+  html.wp-rail body {
+    padding-left: var(--wp-rail-w);
+  }
+  html.wp-rail-collapsed .wp-rail-label {
+    display: none;
+  }
+  html.wp-rail-collapsed .wp-rail-item {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  /* Folded, the brand is its mark alone, and a wide logo fits the column. */
+  html.wp-rail-collapsed .wp-rail-brand img {
+    max-width: 2.5rem;
+  }
+}

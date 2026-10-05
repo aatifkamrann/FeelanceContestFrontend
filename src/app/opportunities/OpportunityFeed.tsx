@@ -656,8 +656,8 @@ export function OpportunityCardView({
   const trustLine = (
     <p className="mt-1 text-sm text-[var(--text-color-secondary)]">
       {/* The trust line: how this client's past promises went, before
-          anyone opens the brief. "New client" is itself information.
-          Each fragment holds together on a narrow screen: the line
+          anyone opens the brief. A client with no rating and no paid
+          award shows no score at all, not a label. Each fragment holds together on a narrow screen: the line
           breaks only after a separator, never inside a date. */}
       <span className="inline-flex items-center gap-1.5 whitespace-nowrap align-middle">
         <Avatar name={c.clientName} url={c.clientAvatarUrl} size="xs" />
@@ -671,20 +671,13 @@ export function OpportunityCardView({
           </span>
         </>
       )}
-      {c.clientAwardsPaid > 0 ? (
+      {c.clientAwardsPaid > 0 && (
         <>
           {' · '}
           <span className="whitespace-nowrap">
             {c.clientAwardsPaid} award{c.clientAwardsPaid === 1 ? '' : 's'} paid
           </span>
         </>
-      ) : (
-        c.clientRatingCount === 0 && (
-          <>
-            {' · '}
-            <span className="whitespace-nowrap">new client</span>
-          </>
-        )
       )}
       {c.publishedAtUtc && !card && (
         <>
@@ -704,7 +697,11 @@ export function OpportunityCardView({
   const entryTag =
     entry &&
     (entry.won ? (
-      <Tag value="You won" severity="success" icon="pi pi-trophy" rounded />
+      c.kind === 'milestones' ? (
+        <Tag value="Hired" severity="success" icon="pi pi-briefcase" rounded />
+      ) : (
+        <Tag value="You won" severity="success" icon="pi pi-trophy" rounded />
+      )
     ) : c.status === 'awarded' ? (
       <Tag
         value="Not selected"
@@ -718,6 +715,10 @@ export function OpportunityCardView({
   const footer = (
     <div className={`flex flex-wrap items-center gap-2 text-sm ${card ? 'mt-auto pt-4' : 'mt-4'}`}>
       <StatusTag status={c.status} />
+      {/* How it pays, where it is not the competition every card assumes. */}
+      {c.kind === 'milestones' && (
+        <Tag value="Paid by milestone" icon="pi pi-wallet" severity="info" rounded title="One freelancer is hired and paid milestone by milestone" />
+      )}
       {entryTag}
       <span className="text-[var(--text-color-secondary)]">
         <i className="pi pi-users mr-1" aria-hidden />

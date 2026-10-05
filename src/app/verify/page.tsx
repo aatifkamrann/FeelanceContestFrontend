@@ -2,13 +2,13 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from 'primereact/button';
 import { Message } from 'primereact/message';
 import { usePortalName } from '@/components/PortalNote';
 import SiteHeader from '@/components/SiteHeader';
-import { ApiError, meQuery } from '@/lib/opportunities';
-import { identityQuery, rememberReturn, returnLabel, safeNext, startVerification } from '@/lib/identity';
+import { meQuery } from '@/lib/opportunities';
+import { identityQuery, rememberReturn, returnLabel, safeNext, startProblem, startVerification } from '@/lib/identity';
 
 /**
  * The step a shut door sends a member to: what verification is, who sees
@@ -20,6 +20,7 @@ import { identityQuery, rememberReturn, returnLabel, safeNext, startVerification
 export default function VerifyPage() {
   const { data: me, isLoading: meLoading } = useQuery(meQuery);
   const { data: identity, isLoading } = useQuery({ ...identityQuery, enabled: !!me });
+  const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const portal = usePortalName();
@@ -29,12 +30,16 @@ export default function VerifyPage() {
     setBusy(true);
     setError(null);
     try {
-      const { url } = await startVerification();
+      // An unfinished session comes back as its own link, so a closed
+      // tab picks up where it was left rather than starting over.
+      const { url } = await startVerification(next);
       rememberReturn(next);
       window.location.href = url;
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'The verification provider could not be reached.');
+      setError(startProblem(err));
       setBusy(false);
+      // Refused because it was decided meanwhile: show where it stands now.
+      void queryClient.invalidateQueries({ queryKey: ['identity'] });
     }
   };
 
@@ -117,6 +122,13 @@ export default function VerifyPage() {
                   (identity.note ? ` (${identity.note})` : '') +
                   '. That is usually a photograph the provider could not read — try again with better light, the whole document in frame, or another document.'
                 }
+              />
+            )}
+            {identity.status === 'pending' && (
+              <Message
+                severity="info"
+                className="mt-6 w-full justify-start"
+                text="You started a verification and have not finished it. Continuing picks it up where you left off, for as long as the provider keeps the session open."
               />
             )}
             {error && <Message severity="error" className="mt-6 w-full justify-start" text={error} />}

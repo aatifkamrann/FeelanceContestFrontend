@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Button } from 'primereact/button';
 import { TabPanel, TabView } from 'primereact/tabview';
 import HelpIcon from '@/components/HelpIcon';
+import IdentityResumeNotice from '@/components/IdentityResumeNotice';
 import SignupRail, { signupSteps } from '@/components/SignupRail';
 import SiteHeader from '@/components/SiteHeader';
 import ProfileReview from '@/components/profile/ProfileReview';
@@ -170,6 +171,9 @@ export default function ProfilePage() {
               </div>
             )}
 
+            {/* A verification left unfinished, until it is finished or lapses. */}
+            <IdentityResumeNotice role={profile.role} returnTo="/profile" />
+
             {/* The portfolio a freelancer fills in; a client's form has none of it. */}
             {profile.role === 'freelancer' && profile.merit.completeness < 100 && (
               <div className="mt-6 rounded-xl border border-[var(--surface-border)] bg-[var(--surface-hover)] p-4">
@@ -203,7 +207,7 @@ export default function ProfilePage() {
             {/* An account action, not part of the portfolio a client reads,
                 so it sits outside the tabs. Hidden where the portal has no
                 GitHub sign-in to offer — the same case in which the merit
-                breakdown drops those three points rather than showing a
+                breakdown drops those two points rather than showing a
                 score nobody here can move. */}
             {profile.githubConnectable && (
               <GitHubRow login={profile.githubLogin} failed={github === 'error'} freelancer={profile.role === 'freelancer'} />
@@ -374,10 +378,10 @@ function GitHubRow({ login, failed, freelancer }: { login: string | null; failed
           {failed
             ? 'GitHub did not finish the connection, and nothing on your account changed. Try again.'
             : login
-              ? (freelancer ? 'Worth three points on your merit score. ' : '') +
+              ? (freelancer ? 'Worth two points on your merit score. ' : '') +
                 'Connecting again replaces the link — that is how you move it to another account, or refresh a username you renamed on GitHub.'
               : freelancer
-                ? 'Worth three points on your merit score, and it is the account a repository opportunity hands work to. Nothing is typed here, so nothing can be mistyped.'
+                ? 'Worth two points on your merit score, and it is the account a repository opportunity hands work to. Nothing is typed here, so nothing can be mistyped.'
                 : 'It is the account a winning repository is handed to once you mark the award paid. Nothing is typed here, so nothing can be mistyped.'}
         </p>
       </div>

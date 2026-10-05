@@ -1035,6 +1035,12 @@ function UserEditor({
           {user.ratings > 0 && ` · ${plural(user.ratings, 'rating', 'ratings')}`}
           {' · '}
           <Link href={`/admin/activity?user=${user.id}`}>Activity</Link>
+          {user.role !== 'admin' && (
+            <>
+              {' · '}
+              <Link href={`/admin/conversations?member=${user.id}`}>Conversations</Link>
+            </>
+          )}
           {' · '}
           {/* The page members read, with what only an administrator sees on
               it; the only way to a locked member's or a client's, which no

@@ -93,7 +93,10 @@ export default async function OpportunityPage({ params }: { params: Promise<{ sl
   // Once an opportunity is decided every entrant repository is archived (or
   // handed over) and every upload is frozen, so nothing can land: the board
   // is a record, not a feed.
-  const decided = opportunity.status === 'awarded' || opportunity.status === 'cancelled';
+  // Paid by milestone, a hire is where the work starts: the board runs on
+  // until the last milestone is paid.
+  const hiredAtWork = opportunity.kind === 'milestones' && opportunity.status === 'awarded' && !opportunity.award?.paidAtUtc;
+  const decided = (opportunity.status === 'awarded' || opportunity.status === 'cancelled') && !hiredAtWork;
   // The board's own words for how a claim arrives, by delivery.
   const repo = usesRepo(opportunity.delivery);
   const upload = usesUpload(opportunity.delivery);
@@ -112,7 +115,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ sl
                 left; the viewer's match at the right. */}
             <div className="mb-3 flex items-start justify-between gap-3">
               <span>
-                <LivePulse state={pulseState(opportunity)} prefix="Opportunity" />
+                <LivePulse state={hiredAtWork ? 'live' : pulseState(opportunity)} prefix="Opportunity" />
               </span>
               {opportunity.viewerFit && <MatchRing fit={opportunity.viewerFit} />}
             </div>
@@ -163,6 +166,26 @@ export default async function OpportunityPage({ params }: { params: Promise<{ sl
 
             {opportunity.award && (
               <div className="mt-4 rounded-xl border border-[var(--primary-color)] bg-[color-mix(in_srgb,var(--primary-color)_8%,transparent)] p-4">
+                {opportunity.kind === 'milestones' ? (
+                  // Paid by milestone: who was hired, and how much of the
+                  // total has been paid — as public as a competitive award's paid line.
+                  <div className="flex items-center gap-3">
+                    <i className="pi pi-briefcase text-2xl text-[var(--primary-color)]" aria-hidden />
+                    <div>
+                      <p className="font-semibold">Hired: {opportunity.award.winnerName}</p>
+                      <p className="text-sm text-[var(--text-color-secondary)]">
+                        {formatAward(opportunity.award.amountPaid ?? 0, opportunity.currency)} of{' '}
+                        {formatAward(opportunity.awardAmount, opportunity.currency)} paid
+                        {' · '}
+                        {(opportunity.award.payments ?? []).filter((p) => p.state === 'paid').length} of{' '}
+                        {opportunity.milestones.length} milestones
+                        {opportunity.award.paidAtUtc && (
+                          <span className="font-medium text-green-700 dark:text-green-400"> · paid in full</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
                 <div className="flex items-center gap-3">
                   <i className="pi pi-trophy text-2xl text-[var(--primary-color)]" aria-hidden />
                   <div>
@@ -193,6 +216,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ sl
                     </p>
                   </div>
                 </div>
+                )}
                 {(opportunity.award.ratingOfClient || opportunity.award.ratingOfWinner) && (
                   <div className="mt-3 flex flex-col gap-2 border-t border-[var(--surface-border)] pt-3 text-sm">
                     {opportunity.award.ratingOfClient && (
@@ -468,7 +492,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ sl
                   header: 'Milestones',
                   icon: 'pi-list-check',
                   count: opportunity.milestones.length,
-                  body: <MilestonesTab milestones={opportunity.milestones} dated={dated} />,
+                  body: <MilestonesTab milestones={opportunity.milestones} dated={dated} currency={opportunity.currency} />,
                 },
                 {
                   key: 'evaluation',
@@ -589,12 +613,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ sl
                   </span>
                 </p>
               )}
-              {opportunity.clientRecord.awardsAnnounced === 0 ? (
-                <p className="mt-2 text-sm text-[var(--text-color-secondary)]">
-                  No completed awards yet — entrants here would be among the first. The
-                  payment record starts with this opportunity.
-                </p>
-              ) : (
+              {opportunity.clientRecord.awardsAnnounced > 0 && (
                 <dl className="mt-3 flex flex-col gap-1.5 text-sm">
                   <div className="flex justify-between">
                     <dt className="text-[var(--text-color-secondary)]">Opportunities posted</dt>

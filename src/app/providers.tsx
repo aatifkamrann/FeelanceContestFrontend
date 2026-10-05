@@ -8,6 +8,7 @@ import Favicon from '@/components/Favicon';
 import SiteFooter from '@/components/SiteFooter';
 import TermsGate from '@/components/TermsGate';
 import VisitBeacon from '@/components/VisitBeacon';
+import ChatDock from '@/components/chat/ChatDock';
 import { brandingQuery, type Branding } from '@/lib/api';
 import { meQuery, type Me } from '@/lib/opportunities';
 
@@ -60,6 +61,9 @@ export default function Providers({
         <Favicon />
         {/* Every navigation, signed in or not, is a row in Admin → Activity. */}
         <VisitBeacon />
+        {/* The conversations at the corner of every page, for a client or a
+            freelancer with one to have; it renders nothing for anyone else. */}
+        <ChatDock />
       </QueryClientProvider>
     </PrimeReactProvider>
   );

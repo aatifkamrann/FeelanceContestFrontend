@@ -123,6 +123,8 @@ type PanelProps = {
   byAdmin?: boolean;
   /** False once the opportunity has left open: the rows are read, not decided. */
   decisionsOpen?: boolean;
+  /** Paid by milestone: selecting is hiring the one freelancer, and the buttons say so. */
+  hiring?: boolean;
 };
 
 const APPLICATION_TAB = 0;
@@ -355,6 +357,7 @@ function Decision({
   renderRemove,
   byAdmin = false,
   decisionsOpen = true,
+  hiring = false,
   withRemove,
 }: PanelProps & { row: ApplicationReviewRow; withRemove: boolean }) {
   const a = r.application;
@@ -362,8 +365,8 @@ function Decision({
     return (
       <div className="mt-2 flex flex-wrap gap-2">
         <Button
-          label="Select"
-          icon="pi pi-user-plus"
+          label={hiring ? 'Hire' : 'Select'}
+          icon={hiring ? 'pi pi-briefcase' : 'pi pi-user-plus'}
           size="small"
           loading={busy}
           disabled={busy}
@@ -384,7 +387,9 @@ function Decision({
     <div className="mt-2">
       <p className="text-xs text-[var(--text-color-secondary)]">
         {a.status === 'selected'
-          ? 'Selected'
+          ? hiring
+            ? 'Hired'
+            : 'Selected'
           : a.status === 'removed'
             ? 'Removed from the opportunity'
             : a.status === 'withdrawn'
@@ -410,7 +415,7 @@ function Decision({
           back while no work has arrived. A removal or a withdrawal is final. */}
       {a.status === 'selected' && decisionsOpen && (
         <Button
-          label="Take back selection"
+          label={hiring ? 'Take back the hire' : 'Take back selection'}
           icon="pi pi-undo"
           size="small"
           text
@@ -422,7 +427,7 @@ function Decision({
       )}
       {a.status === 'not_selected' && decisionsOpen && (
         <Button
-          label="Select after all"
+          label={hiring ? 'Hire after all' : 'Select after all'}
           icon="pi pi-user-plus"
           size="small"
           text

@@ -238,7 +238,7 @@ export default function LandingPage({ data }: { data: LandingData }) {
                 <div key={part.label} className="lp-bar-row">
                   <span className="lp-bar-label">{part.label}</span>
                   <span className="lp-bar">
-                    <span style={{ '--w': `${(part.points / 20) * 100}%` } as React.CSSProperties} />
+                    <span style={{ '--w': `${(part.points / RECORD_PART_MAX) * 100}%` } as React.CSSProperties} />
                   </span>
                   <span className="lp-bar-value">{part.points}</span>
                 </div>
@@ -476,17 +476,19 @@ const MATCH_POINTS = [
 
 /**
  * The record half of the merit score: what the portal itself watched
- * happen, out of 70 of the 100 points — the other 30 are the profile's,
+ * happen, out of 75 of the 100 points — the other 25 are the profile's,
  * capped. Mirrors Merit.RecordParts on the API (Services/Profiles/Merit.cs);
  * keep the two in step.
  */
 const RECORD_PARTS = [
-  { label: 'Milestones met on time', points: 20 },
+  { label: 'Milestones met on time', points: 30 },
   { label: 'Opportunities won', points: 20 },
-  { label: 'Ratings from clients', points: 15 },
-  { label: 'Opportunities entered', points: 15 },
+  { label: 'Opportunities entered', points: 20 },
+  { label: 'Ratings from clients', points: 5 },
 ];
 const RECORD_POINTS = RECORD_PARTS.reduce((sum, p) => sum + p.points, 0);
+/** The longest bar: every row is drawn as a share of it. */
+const RECORD_PART_MAX = Math.max(...RECORD_PARTS.map((p) => p.points));
 
 const GROWTH = [
   { title: 'Join & Build', desc: 'Create your profile: headline, skills and past work.' },
@@ -498,11 +500,11 @@ const GROWTH = [
 
 /** The same lines as RECORD_PARTS, plus the profile's capped share — what each is worth. */
 const INCENTIVES = [
-  { action: 'Meet milestones on time', result: 'Up to 20 points' },
-  { action: 'Win opportunities', result: '10 points a win' },
-  { action: 'Earn client ratings', result: 'Up to 15 points' },
-  { action: 'Keep entering', result: 'Up to 15 points' },
-  { action: 'Complete your profile', result: 'Up to 30 points' },
+  { action: 'Meet milestones on time', result: 'Up to 30 points' },
+  { action: 'Win opportunities', result: '5 points a win' },
+  { action: 'Keep entering', result: '2 points an entry' },
+  { action: 'Earn client ratings', result: 'Up to 5 points' },
+  { action: 'Complete your profile', result: 'Up to 25 points' },
 ];
 
 const TRUST = [
@@ -599,9 +601,9 @@ function loopSteps(c: OpportunityCard | null): LoopStep[] {
     {
       icon: 'pi-arrow-up',
       label: 'MERIT',
-      value: '+10',
+      value: '+5',
       sub: 'MeritScore for a win',
-      desc: 'Each of your first two wins adds ten points; milestones met on time and client ratings add more.',
+      desc: 'Each of your first four wins adds five points; milestones met on time and client ratings add more.',
     },
     {
       icon: 'pi-chart-line',

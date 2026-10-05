@@ -57,7 +57,7 @@ export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   return fetch(apiUrl(path), { credentials: 'include', referrerPolicy: 'no-referrer-when-downgrade', ...init });
 }
 
-export type SetupStatus = { completed: boolean };
+export type SetupStatus = { completed: boolean; needsDatabase?: boolean };
 export type Branding = {
   portalName: string | null;
   accentColor: string | null;
@@ -135,7 +135,7 @@ export const privacyQuery = {
   staleTime: 60_000,
 };
 
-/** null = API unreachable (distinct from “setup incomplete”). */
+/** null = API unreachable (distinct from “setup incomplete”); needsDatabase = it is waiting for the setup page to connect one. */
 export async function getSetupStatus(): Promise<SetupStatus | null> {
   try {
     const res = await fetch(`${apiBase()}/api/setup/status`, { cache: 'no-store' });

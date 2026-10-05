@@ -32,7 +32,9 @@ type Setting = {
   isMultiline: boolean;
   /** Present when the setting is a choice: the screen offers these and the API refuses anything else. */
   choices?: { value: string; label: string }[] | null;
-  locked: boolean;
+  /** Where the value in force comes from: what is saved wins, then the deployment's variable, then the default. */
+  source: 'saved' | 'environment' | 'default';
+  /** The deployment's variable for this key, when it sets one — in force only while nothing is saved. */
   envVar: string | null;
   value: string | null;
   hasValue: boolean;
@@ -55,8 +57,6 @@ type SetupDto = {
   id: string;
   name: string;
   enabled: boolean;
-  /** An environment variable sets one of its values, so only the deployment can remove it. */
-  locked: boolean;
   settings: Setting[];
   /** What still lives in it ("12 files"), which stops it being removed. */
   inUse?: string | null;
@@ -73,6 +73,8 @@ type Group = {
   setups?: SetupDto[] | null;
   /** The fields a setup added here starts from, keyed as the main setup's. */
   template?: Setting[] | null;
+  /** A warning the group's state earns — the AI switch on while the privacy policy does not say so. */
+  notice?: string | null;
 };
 
 /** A setup as the list keeps it — what the screen sends back under the group's list key. */
@@ -131,7 +133,8 @@ const SETUP_WORDS: Record<string, { noun: string; add: string; intro: string; ac
   ai: {
     noun: 'AI provider',
     add: 'Add an AI provider',
-    intro: 'One provider is active at a time: every AI call goes to it.',
+    intro:
+      'One provider is active at a time: every AI call goes to it. An inactive setup marked Standby is asked instead when the active provider cannot be reached.',
     across: 'Switches and limits',
   },
   identity: {
@@ -173,6 +176,27 @@ const EMAIL_PROVIDER_FIELDS = new Set(Object.values(EMAIL_FIELDS).flat());
 const emailFieldShown = (key: string, provider: string | null) =>
   !EMAIL_PROVIDER_FIELDS.has(key) ||
   (EMAIL_FIELDS[provider?.trim().toLowerCase() || 'smtp'] ?? []).includes(key);
+
+/**
+ * The fields each verification provider reads (Identity/IdentityKeys.cs,
+ * IdentityProviders.FieldsOf, keeps the same lists): Didit's key, workflow
+ * and webhook secret, or Shufti Pro's client ID and secret key. Hidden
+ * fields are kept, not cleared, as with email.
+ */
+const IDENTITY_FIELDS: Record<string, string[]> = {
+  didit: ['identity.apiKey', 'identity.workflowId', 'identity.webhookSecret'],
+  shuftipro: ['identity.clientId', 'identity.apiKey'],
+};
+const IDENTITY_PROVIDER_FIELDS = new Set(Object.values(IDENTITY_FIELDS).flat());
+
+const identityFieldShown = (key: string, provider: string | null) =>
+  !IDENTITY_PROVIDER_FIELDS.has(key) ||
+  (IDENTITY_FIELDS[provider?.trim().toLowerCase() || 'didit'] ?? []).includes(key);
+
+/** What a provider calls a shared field, where it differs from the registry's label. */
+const IDENTITY_LABELS: Record<string, Record<string, string>> = {
+  shuftipro: { 'identity.apiKey': 'Secret key' },
+};
 
 type Me = { email: string; displayName: string; role: string };
 
@@ -263,7 +287,7 @@ const TESTS: Record<string, { path: string; label: string; icon: string; says: s
   },
   identity: {
     path: 'test-identity',
-    label: 'Test Didit',
+    label: 'Test provider',
     icon: 'pi pi-id-card',
     says: 'Asks the provider for a session that does not exist: a good key is told so, a bad key is refused. Nothing is opened and nothing is billed. Works with the master switch still off.',
   },
@@ -604,12 +628,19 @@ export default function SettingsScreen() {
   const redisEnabledSetting = allSettings.find((s) => s.key === 'redis.enabled');
   const redisEnabled =
     ('redis.enabled' in dirty ? dirty['redis.enabled'] : redisEnabledSetting?.value) === 'true';
-  // The two groups with a master switch: while it is off, the rest of the
+  const evalEnabledSetting = allSettings.find((s) => s.key === 'eval.enabled');
+  const evalEnabled =
+    ('eval.enabled' in dirty ? dirty['eval.enabled'] : evalEnabledSetting?.value) === 'true';
+  // The groups with a master switch: while it is off, the rest of the
   // group is shown as the inert thing it is.
+  // The AI body retention stays live while the switch is off: its sweep
+  // runs regardless, and the rows from before the switch was turned off
+  // are the ones most worth clearing.
   const governedOff = (group: string, key: string) =>
-    (group === 'ai' && key !== 'ai.enabled' && !aiEnabled) ||
+    (group === 'ai' && key !== 'ai.enabled' && key !== 'ai.bodyRetentionDays' && !aiEnabled) ||
     (group === 'identity' && key !== 'identity.enabled' && !identityEnabled) ||
-    (group === 'redis' && key !== 'redis.enabled' && !redisEnabled);
+    (group === 'redis' && key !== 'redis.enabled' && !redisEnabled) ||
+    (group === 'eval' && key !== 'eval.enabled' && !evalEnabled);
 
   // Dirty means *different*, not merely touched: toggling a switch back to
   // where it started should clear it, so save never writes a no-op audit row.
@@ -700,29 +731,43 @@ export default function SettingsScreen() {
   const renderField = (s: Setting, governed: boolean, action?: ReactNode) => {
     const isDirty = s.key in dirty;
     const shown = isDirty ? dirty[s.key] ?? '' : s.value ?? '';
-    const disabled = s.locked || governed;
+    const disabled = governed;
     return (
       <div className={`flex flex-col gap-1 ${governed ? 'opacity-60' : ''}`} key={s.key}>
         <label className="text-sm font-medium" htmlFor={s.key}>
           {s.label}
           {s.helpTopic && <HelpIcon topic={s.helpTopic} label={s.label} />}{' '}
-          {s.locked && (
-            <Tag value={s.envVar ?? 'env'} severity="info" className="ml-1" title="Set by environment variable — edit the deployment, not this form." />
+          {s.envVar && (
+            <Tag
+              value={s.source === 'environment' ? `from ${s.envVar}` : `overrides ${s.envVar}`}
+              severity="info"
+              className="ml-1"
+              title={
+                s.source === 'environment'
+                  ? 'The deployment sets this in an environment variable. Save a value here and it wins; clear it and the variable applies again.'
+                  : 'The deployment also sets this in an environment variable. What is saved here wins; clear it and the variable applies again.'
+              }
+            />
           )}
-          {s.isSecret && !s.locked && (
+          {s.isSecret && (
             <Tag value={s.hasValue ? 'set' : 'not set'} severity={s.hasValue ? 'success' : 'warning'} className="ml-1" />
           )}
           {isDirty && <Tag value="unsaved" severity="danger" className="ml-1" />}
         </label>
         {s.choices?.length ? (
           <div className="flex items-center gap-2">
+            {/* A choice with no default may be left unset — the eval
+                provider, whose variable fills in while it is — so it says
+                so, and can be cleared back to that. */}
             <Dropdown
               inputId={s.key}
               value={shown}
               options={s.choices}
               optionLabel="label"
               optionValue="value"
-              onChange={(e) => setValue(s.key, e.value as string)}
+              onChange={(e) => setValue(s.key, (e.value as string | null | undefined) ?? null)}
+              placeholder={s.default ? undefined : 'Not set'}
+              showClear={!s.default && !!shown && !disabled}
               disabled={disabled}
               className="min-w-0 flex-1"
             />
@@ -870,11 +915,13 @@ export default function SettingsScreen() {
           // changes with the choice before the save, like the phone's.
           const sendThrough = fields.find((f) => mainKey(f.key) === 'email.provider');
           const emailProvider = sendThrough ? valueOf(sendThrough) : null;
-          const cannotRemove = dto?.locked
-            ? 'An environment variable sets one of its values — remove it from the deployment first.'
-            : dto?.inUse
-              ? `Holds ${dto.inUse} — leave it inactive instead; what is there stays reachable.`
-              : null;
+          // A verification setup likewise shows only its provider's fields.
+          const verifier = fields.find((f) => mainKey(f.key) === 'identity.provider');
+          const identityProvider = verifier ? valueOf(verifier) : null;
+          const identityLabels = IDENTITY_LABELS[identityProvider?.trim().toLowerCase() || 'didit'] ?? {};
+          const cannotRemove = dto?.inUse
+            ? `Holds ${dto.inUse} — leave it inactive instead; what is there stays reachable.`
+            : null;
 
           return (
             <section
@@ -928,7 +975,13 @@ export default function SettingsScreen() {
                   </>
                 )}
                 {dto?.inUse && <Tag value={dto.inUse} severity="warning" icon="pi pi-inbox" />}
-                {dto?.locked && <Tag value="environment" severity="info" title="Some values are set by environment variables." />}
+                {dto?.settings.some((f) => f.source === 'environment') && (
+                  <Tag
+                    value="environment"
+                    severity="info"
+                    title="Some values come from the deployment's environment variables. What you save here wins over them."
+                  />
+                )}
                 {(entryDirty || fieldsDirty) && <Tag value={isNew ? 'new, unsaved' : 'unsaved'} severity="danger" />}
 
                 <div className="ml-auto flex items-center gap-1">
@@ -969,9 +1022,14 @@ export default function SettingsScreen() {
                   />
                   {fields
                     .filter((s) => emailFieldShown(mainKey(s.key), emailProvider))
-                    .map((s) =>
-                      renderField(s, CUSTOM_PHONE_FIELDS.includes(mainKey(s.key)) && phoneProvider !== 'custom'),
-                    )}
+                    .filter((s) => identityFieldShown(mainKey(s.key), identityProvider))
+                    .map((s) => {
+                      const label = identityLabels[mainKey(s.key)];
+                      return renderField(
+                        label ? { ...s, label } : s,
+                        CUSTOM_PHONE_FIELDS.includes(mainKey(s.key)) && phoneProvider !== 'custom',
+                      );
+                    })}
                 </div>
               )}
             </section>
@@ -1082,7 +1140,7 @@ export default function SettingsScreen() {
               icon="pi pi-key"
               size="small"
               outlined
-              disabled={!signingKey || signingKey.locked}
+              disabled={!signingKey}
               title="Make a new random key in this browser. Nothing changes until you save and restart."
               onClick={() => setValue(JWT_KEYS.signingKey, newSigningKey())}
             />,
@@ -1136,9 +1194,9 @@ export default function SettingsScreen() {
           <div>
             <h1 className="text-2xl font-semibold">Settings</h1>
             <p className="text-[var(--text-color-secondary)]">
-              Signed in as {me.data?.displayName}. Locked values come from
-              environment variables; secrets are stored encrypted and never
-              shown back.
+              Signed in as {me.data?.displayName}. What you save here wins over
+              the deployment&apos;s environment variables, which apply only to
+              fields left blank; secrets are stored encrypted and never shown back.
             </p>
           </div>
 
@@ -1157,6 +1215,16 @@ export default function SettingsScreen() {
                             severity="info"
                             className="w-full justify-start"
                             text="AI automation is off. Nothing below runs and no data leaves this server until you turn it on."
+                          />
+                        )}
+                        {group.notice && (
+                          <Message severity="warn" className="w-full justify-start" text={group.notice} />
+                        )}
+                        {group.name === 'eval' && !evalEnabled && (
+                          <Message
+                            severity="info"
+                            className="w-full justify-start"
+                            text="AI evals are off. The eval tool refuses to run, and the key below spends nothing, until you turn them on."
                           />
                         )}
                         {group.name === 'identity' && !identityEnabled && (

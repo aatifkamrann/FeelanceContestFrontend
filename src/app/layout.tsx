@@ -66,12 +66,13 @@ var sc=localStorage.getItem('wp.theme.statusCss');
 if(sc){var t=document.createElement('style');t.id='app-status';document.head.appendChild(t);t.textContent=sc;}
 // The side rail (components/SideNav.tsx): pages without a header render
 // none — nor does the landing page at the root (p is ''), which draws a
-// header of its own — and a fold remembered on this device applies before
-// the first paint rather than after hydration, so the content never jumps.
+// header of its own. The rail starts folded, and an unfold remembered on
+// this device applies before the first paint rather than after hydration,
+// so the content never jumps.
 var p=location.pathname.split('/')[1];
 if(['','login','register','forgot-password','reset-password','setup'].indexOf(p)<0){
-document.documentElement.classList.add('wp-rail');
-if(localStorage.getItem('wp.rail')==='collapsed'){document.documentElement.classList.add('wp-rail-collapsed');}
+document.documentElement.classList.add('wp-rail','wp-rail-collapsed');
+if(localStorage.getItem('wp.rail')==='open'){document.documentElement.classList.remove('wp-rail-collapsed');}
 }
 }catch(e){}})();`;
 

@@ -77,8 +77,7 @@ export function Panel({
 }: {
   /**
    * An anchor for links: arriving with #id in the address opens the panel
-   * and brings it into view, whatever fold was remembered — the dashboard's
-   * health tiles open Operations this way.
+   * and brings it into view, whatever fold was remembered.
    */
   id?: string;
   title: string;

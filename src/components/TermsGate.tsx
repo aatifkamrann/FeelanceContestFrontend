@@ -1,13 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from 'primereact/button';
 import { Dialog } from 'primereact/dialog';
 import { Message } from 'primereact/message';
 import { termsQuery } from '@/lib/api';
-import { meQuery, postJson } from '@/lib/opportunities';
+import { meQuery, postJson, startFreshAt } from '@/lib/opportunities';
 import { splitTermsTitle, STOCK_TERMS_TITLE } from '@/lib/terms';
 import TermsText from './TermsText';
 
@@ -21,7 +20,6 @@ import TermsText from './TermsText';
  * and neither does anyone on a portal without terms.
  */
 export default function TermsGate() {
-  const router = useRouter();
   const queryClient = useQueryClient();
   const { data: me } = useQuery(meQuery);
   const pending = !!me?.termsPending;
@@ -50,9 +48,7 @@ export default function TermsGate() {
 
   const signOut = async () => {
     await postJson('/api/auth/logout');
-    await queryClient.invalidateQueries({ queryKey: ['me'] });
-    router.push('/');
-    router.refresh();
+    startFreshAt('/');
   };
 
   const changed = me?.acceptedTermsVersion != null;

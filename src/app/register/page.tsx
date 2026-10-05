@@ -18,7 +18,7 @@ import PasswordRules from '@/components/PasswordRules';
 import PhoneField from '@/components/PhoneField';
 import SignupRail from '@/components/SignupRail';
 import { brandingQuery } from '@/lib/api';
-import { meQuery, postJson, type CodeSentTo } from '@/lib/opportunities';
+import { meQuery, postJson, startFreshAt, type CodeSentTo } from '@/lib/opportunities';
 import { passwordAcceptable } from '@/lib/password';
 
 /**
@@ -101,12 +101,12 @@ export default function RegisterPage() {
   // enter outranks anything — and otherwise to step three of the rail, on
   // their profile, which is the one thing a brand-new account has that
   // clients will actually read.
+  // A page load, not a client-side move: whoever this tab held before —
+  // an account signed out of here, or one whose session lapsed — must not
+  // hand the new one its profile.
   const land = () => {
     const next = safeNext();
-    router.push(
-      role === 'client' ? '/client/opportunities' : next === '/' ? '/profile?step=3&welcome=1' : next,
-    );
-    router.refresh();
+    startFreshAt(role === 'client' ? '/client/opportunities' : next === '/' ? '/profile?step=3&welcome=1' : next);
   };
 
   const submit = async (e: React.FormEvent) => {

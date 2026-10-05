@@ -5,32 +5,37 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from 'primereact/button';
 import { ConfirmDialog, confirmDialog } from 'primereact/confirmdialog';
 import { Message } from 'primereact/message';
-import { Password } from 'primereact/password';
 import { ProgressBar } from 'primereact/progressbar';
-import { SelectButton } from 'primereact/selectbutton';
 import { Tag } from 'primereact/tag';
+import DatabaseConnectionForm from '@/components/DatabaseConnectionForm';
 import DatabaseTestResult from '@/components/DatabaseTestResult';
 import HelpIcon from '@/components/HelpIcon';
 import SiteHeader from '@/components/SiteHeader';
 import { Panel } from '@/components/dashboard/kit';
 import { ApiError, meQuery, relativeTime } from '@/lib/opportunities';
 import {
-  PROVIDERS,
   databaseQuery,
+  fieldsFrom,
   isMoveRunning,
   moveQuery,
   phaseLabel,
+  sameFields,
+  saveConnection,
   startMove,
   testDatabase,
+  type DatabaseConnection,
+  type DatabaseConnectionFields,
   type DatabaseTest,
 } from '@/lib/database';
 import { apiFetch } from '@/lib/api';
 
 /**
- * Where the portal's data is, and the one way to move it. A move is the
- * heaviest thing an administrator can do from a browser: the portal pauses,
- * every table is copied, the choice is written beside the keys, and the API
- * restarts on the new database — so the page tests first, asks twice, and
+ * Where the portal's data is, and the two ways to change it: save an edited
+ * connection onto this portal's own data (a new password, a new host, a
+ * restored copy), or move everything into an empty database — the heaviest
+ * thing an administrator can do from a browser: the portal pauses, every
+ * table is copied, the choice is written beside the keys, and the API
+ * restarts on the new database. Either way the page tests first, asks, and
  * then reports each phase until the health probe answers again.
  */
 export default function DatabasePage() {
@@ -68,10 +73,8 @@ export default function DatabasePage() {
                 <dt className="text-[var(--text-color-secondary)]">Chosen by</dt>
                 <dd className="m-0">
                   {data.source === 'override'
-                    ? `a move, recorded in ${data.overridePath}`
-                    : data.source === 'environment'
-                      ? 'the environment (DATABASE__PROVIDER and ConnectionStrings__Db)'
-                      : 'the development fallback'}
+                    ? `the connection saved here, in ${data.overridePath} — it wins over ConnectionStrings__Db`
+                    : 'the environment (DATABASE__PROVIDER and ConnectionStrings__Db)'}
                 </dd>
               </dl>
               {data.restartPending && (
@@ -80,15 +83,15 @@ export default function DatabasePage() {
                   className="mt-4 w-full justify-start"
                   content={
                     <span className="text-sm">
-                      <Tag value="Restart pending" severity="warning" icon="pi pi-refresh" className="mr-2" />A move has
-                      recorded another database and the API has not come back up on it yet. Restart the API service; it
+                      <Tag value="Restart pending" severity="warning" icon="pi pi-refresh" className="mr-2" />Another database
+                      or connection is recorded and the API has not come back up on it yet. Restart the API service; it
                       reads {data.overridePath} at startup.
                     </span>
                   }
                 />
               )}
             </Panel>
-            <MovePanel current={data.provider} running={isMoveRunning(data.move.phase) || data.move.phase === 'restarting'} />
+            <ConnectionPanel current={data.connection} running={isMoveRunning(data.move.phase) || data.move.phase === 'restarting'} />
           </div>
         )}
       </main>
@@ -96,12 +99,14 @@ export default function DatabasePage() {
   );
 }
 
-function MovePanel({ current, running: initiallyRunning }: { current: string; running: boolean }) {
+function ConnectionPanel({ current, running: initiallyRunning }: { current: DatabaseConnection; running: boolean }) {
   const queryClient = useQueryClient();
-  const [provider, setProvider] = useState(current === 'postgres' ? 'sqlserver' : 'postgres');
-  const [connectionString, setConnectionString] = useState('');
+  // Starts from where the portal is: a new password is one field, a move to
+  // a new database on the same server a change of name, and a blank
+  // password keeps the login's while the server and user stay the same.
+  const [fields, setFields] = useState<DatabaseConnectionFields>(() => fieldsFrom(current));
   const [testing, setTesting] = useState(false);
-  const [test, setTest] = useState<{ forString: string; result: DatabaseTest } | null>(null);
+  const [test, setTest] = useState<{ forFields: DatabaseConnectionFields; result: DatabaseTest } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [watching, setWatching] = useState(initiallyRunning);
   const { data: move } = useQuery({
@@ -116,8 +121,8 @@ function MovePanel({ current, running: initiallyRunning }: { current: string; ru
     setError(null);
     setTest(null);
     try {
-      const result = await testDatabase({ provider, connectionString });
-      setTest({ forString: connectionString, result });
+      const result = await testDatabase(fields);
+      setTest({ forFields: fields, result });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'The API could not be reached.');
     } finally {
@@ -125,7 +130,36 @@ function MovePanel({ current, running: initiallyRunning }: { current: string; ru
     }
   };
 
-  const tested = test !== null && test.forString === connectionString && test.result.problem === null;
+  const tested = test !== null && sameFields(test.forFields, fields) && test.result.problem === null;
+  const action = tested ? test!.result.action : null;
+
+  const confirmSave = () => {
+    const there = test?.result.target;
+    const here = test?.result.current;
+    confirmDialog({
+      header: 'Save this connection and restart?',
+      message:
+        'The portal pauses for a moment, the connection is saved beside the data-protection keys, and the API restarts ' +
+        'on it — about half a minute.' +
+        (there && here
+          ? ` That database holds ${there.accounts} accounts and ${there.opportunities} opportunities; the one in use holds ${here.accounts} and ${here.opportunities}.`
+          : '') +
+        ' Nothing is copied or deleted.',
+      icon: 'pi pi-exclamation-triangle',
+      acceptLabel: 'Save and restart',
+      rejectLabel: 'Not now',
+      accept: async () => {
+        setError(null);
+        try {
+          await saveConnection(fields);
+          setWatching(true);
+          await queryClient.invalidateQueries({ queryKey: moveQuery.queryKey });
+        } catch (err) {
+          setError(err instanceof ApiError ? err.message : 'The API could not be reached.');
+        }
+      },
+    });
+  };
 
   const confirmMove = () =>
     confirmDialog({
@@ -140,7 +174,7 @@ function MovePanel({ current, running: initiallyRunning }: { current: string; ru
       accept: async () => {
         setError(null);
         try {
-          await startMove({ provider, connectionString });
+          await startMove(fields);
           setWatching(true);
           await queryClient.invalidateQueries({ queryKey: moveQuery.queryKey });
         } catch (err) {
@@ -150,69 +184,46 @@ function MovePanel({ current, running: initiallyRunning }: { current: string; ru
     });
 
   return (
-    <Panel title="Move to another database" help="admin.database.move">
+    <Panel title="Connection" help="admin.database.connection">
       {watching && move ? (
         <MoveProgress move={move} />
       ) : (
         <div className="flex flex-col gap-4">
           <p className="text-sm text-[var(--text-color-secondary)]">
-            Point the portal at an empty database — SQL Server 2022 or later with Full-Text Search, or PostgreSQL — test
-            it, then move. The portal creates the tables itself.
+            Where the portal reaches its database. Edit it for a new password or a new host, or point it at an empty
+            database — SQL Server 2022 or later with Full-Text Search, or PostgreSQL — to move everything there. The test
+            says which it is: this portal&apos;s data is saved onto, an empty database is moved into.
           </p>
-          <div>
-            <label className="mb-1 block text-sm font-medium">Database</label>
-            <SelectButton
-              value={provider}
-              options={PROVIDERS}
-              onChange={(e) => {
-                if (e.value) {
-                  setProvider(e.value);
-                  setTest(null);
-                }
-              }}
-              allowEmpty={false}
-            />
-          </div>
-          <div>
-            <label htmlFor="db-cs" className="mb-1 flex items-center gap-1 text-sm font-medium">
-              Connection string <HelpIcon topic="admin.database.test" label="What a connection string needs" />
-            </label>
-            <Password
-              inputId="db-cs"
-              value={connectionString}
-              onChange={(e) => {
-                setConnectionString(e.target.value);
-              }}
-              feedback={false}
-              toggleMask
-              className="w-full"
-              inputClassName="w-full font-mono text-xs"
-              placeholder={
-                provider === 'sqlserver'
-                  ? 'Server=host,1433;Database=winnersportal;User Id=…;Password=…;TrustServerCertificate=True'
-                  : 'Host=host;Port=5432;Database=winnersportal;Username=…;Password=…'
-              }
-            />
-          </div>
-          {test && <DatabaseTestResult provider={provider} result={test.result} />}
+          <DatabaseConnectionForm value={fields} onChange={setFields} current={current} idPrefix="move" />
+          {test && <DatabaseTestResult provider={test.forFields.provider} result={test.result} />}
           {error && <Message severity="error" className="w-full justify-start" text={error} />}
           <div className="flex flex-wrap items-center gap-3">
             <Button
-              label="Test"
+              label="Test connection"
               icon="pi pi-bolt"
               outlined
               loading={testing}
-              disabled={connectionString.trim().length === 0}
+              disabled={!fields.server.trim() || !fields.database.trim()}
               onClick={() => void runTest()}
             />
-            <Button
-              label="Move"
-              icon="pi pi-arrow-right-arrow-left"
-              severity="warning"
-              disabled={!tested}
-              title={tested ? undefined : 'Test the connection first; a move starts only from a passing test of this exact string.'}
-              onClick={confirmMove}
-            />
+            <HelpIcon topic="admin.database.test" label="What the test checks" />
+            {action === 'move' ? (
+              <Button label="Move data here" icon="pi pi-arrow-right-arrow-left" severity="warning" onClick={confirmMove} />
+            ) : (
+              <Button
+                label="Save and restart"
+                icon="pi pi-save"
+                severity="warning"
+                disabled={action !== 'switch'}
+                title={
+                  action === 'switch'
+                    ? undefined
+                    : 'Test the connection first; saving starts only from a passing test of exactly these fields.'
+                }
+                onClick={confirmSave}
+              />
+            )}
+            <HelpIcon topic="admin.database.move" label="What a move does" />
           </div>
         </div>
       )}
@@ -269,7 +280,7 @@ function MoveProgress({ move }: { move: { phase: string; targetServer: string | 
           icon={move.phase === 'failed' ? 'pi pi-times-circle' : restarting ? 'pi pi-refresh' : 'pi pi-spin pi-spinner'}
           className="mr-2"
         />
-        to {move.targetServer} / {move.targetDatabase}
+        {move.tablesTotal > 0 || isMoveRunning(move.phase) ? 'to' : 'on'} {move.targetServer} / {move.targetDatabase}
         {move.startedAtUtc && (
           <span className="text-[var(--text-color-secondary)]">
             {' '}
@@ -293,7 +304,11 @@ function MoveProgress({ move }: { move: { phase: string; targetServer: string | 
           text={
             backUp === 'up'
               ? 'The API is back. The panel above says which database it came up on.'
-              : 'Every table is copied and the choice is recorded. The API is restarting on the new database — this takes about half a minute, and the page will say when it is back.'
+              : (move.tablesTotal > 0
+                  ? 'Every table is copied and the choice is recorded. '
+                  : 'The connection is saved. ') +
+                'The API is restarting on it — this takes about half a minute, and the page will say when it is back. ' +
+                'If nothing restarts the API for you (Visual Studio, dotnet run), start it again.'
           }
         />
       )}

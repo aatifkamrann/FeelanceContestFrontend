@@ -12,15 +12,50 @@ export type NavItem = {
   label: string;
   icon: string;
   /**
-   * The section this menu sits under, where it has one — "Reports" —
+   * The section this menu sits under, where it has one — "Operations",
+   * "Reports" —
    * rendered as a heading over the run of menus that share it in the rail,
    * and as a prefix on the phone row, where a heading has no room.
    */
   group?: string;
 };
 
-/** localStorage: 'collapsed' when the rail is folded to its icons. */
+/**
+ * localStorage: 'open' once the viewer has unfolded the rail on this
+ * device. Anything else, the key missing included, means folded to its
+ * icons: the rail starts folded (since 30 September 2026), so an older
+ * 'collapsed' reads as folded too.
+ */
 export const RAIL_KEY = 'wp.rail';
+
+function railOpen(): boolean {
+  try {
+    return localStorage.getItem(RAIL_KEY) === 'open';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The sections whose heading folds the menus under it. They start folded,
+ * so an administrator's rail opens on the pages used every day rather than
+ * eight that are not; an unfold is remembered per device, as the rail's own
+ * is. Legal is not among them: a visitor's two links are the reason it shows.
+ */
+const FOLDING = new Set(['Operations', 'Reports']);
+
+/** localStorage: 'open' once the viewer has unfolded that section; missing means folded. */
+const groupKey = (group: string) => `wp.rail.group.${group.toLowerCase()}`;
+
+function groupsOpen(): Set<string> {
+  const open = new Set<string>();
+  try {
+    for (const group of FOLDING) if (localStorage.getItem(groupKey(group)) === 'open') open.add(group);
+  } catch {
+    /* storage unavailable: every section folded */
+  }
+  return open;
+}
 
 /**
  * The page menus for whoever is signed in — the one list that both the
@@ -45,15 +80,25 @@ export function navItemsFor(role: string | null | undefined, legal: LegalLink[] 
   if (role) items.push({ href: '/dashboard', label: 'Dashboard', icon: 'pi pi-th-large' });
   if (role === 'client') items.push({ href: '/client/opportunities', label: 'My opportunities', icon: 'pi pi-briefcase' });
   if (role === 'freelancer') items.push({ href: '/entries', label: 'My Opportunities', icon: 'pi pi-flag' });
+  // The conversations between a client and their entrants: both seats.
+  if (role === 'client' || role === 'freelancer') items.push({ href: '/messages', label: 'Messages', icon: 'pi pi-comments' });
   // Everyone with an account has one; a freelancer's is the one clients read.
   if (role) items.push({ href: '/profile', label: 'Profile', icon: 'pi pi-id-card' });
   if (role === 'admin') {
     items.push(
-      { href: '/admin/operations', label: 'Operations', icon: 'pi pi-wrench' },
       { href: '/admin/users', label: 'Users', icon: 'pi pi-users' },
       { href: '/admin/activity', label: 'Activity', icon: 'pi pi-history' },
+      // Members' conversations, read-only, for moderation.
+      { href: '/admin/conversations', label: 'Conversations', icon: 'pi pi-comments' },
       { href: '/admin/database', label: 'Database', icon: 'pi pi-database' },
       { href: '/admin/settings', label: 'Settings', icon: 'pi pi-cog' },
+      // Stuck machinery and the buttons that restart it, then what runs
+      // slow and what the AI costs: a page each, as the reports are.
+      { href: '/admin/operations/repositories', label: 'Repositories', icon: 'pi pi-github', group: 'Operations' },
+      { href: '/admin/operations/awards', label: 'Awards', icon: 'pi pi-send', group: 'Operations' },
+      { href: '/admin/operations/webhooks', label: 'Webhooks', icon: 'pi pi-bolt', group: 'Operations' },
+      { href: '/admin/operations/queries', label: 'Slow queries', icon: 'pi pi-stopwatch', group: 'Operations' },
+      { href: '/admin/operations/ai-usage', label: 'AI usage', icon: 'pi pi-sparkles', group: 'Operations' },
     );
   }
   // Reports for every account: an administrator's cover the portal, a
@@ -93,33 +138,57 @@ export function navLinkClass(here: boolean): string {
 
 /**
  * The side rail: the page menus down the left edge on screens wide enough
- * for one, folding to a column of icons. The fold is remembered per device
- * (like light/dark mode and the dashboard panels — how one person lays out
- * their screen is not a fact about the account) and applied before first
- * paint by the layout's inline script through a class on <html>; the CSS in
- * globals.css keys off that class, so the width never jumps on load. React
- * only mirrors it, for the toggle and the tooltips.
+ * for one, folding to a column of icons. It starts folded, and an unfold
+ * is remembered per device (like light/dark mode and the dashboard panels —
+ * how one person lays out their screen is not a fact about the account).
+ * The layout's inline script applies it before first paint through a class
+ * on <html>; the CSS in globals.css keys off that class, so the width never
+ * jumps on load. The effect below applies it again, because a page reached
+ * by client-side navigation from one without a rail (the landing page, the
+ * sign-in forms) was never seen by that script.
  */
 export default function SideNav({ items, name }: { items: NavItem[]; name: string }) {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
+  // Folded is the default, so the server's HTML matches most viewers.
+  const [collapsed, setCollapsed] = useState(true);
 
   useEffect(() => {
     const html = document.documentElement;
     // Pages without a header (sign in, setup) render no rail, and the body
     // must not keep a rail's worth of padding after navigating to one.
     html.classList.add('wp-rail');
-    setCollapsed(html.classList.contains('wp-rail-collapsed'));
+    const folded = !railOpen();
+    html.classList.toggle('wp-rail-collapsed', folded);
+    setCollapsed(folded);
     return () => html.classList.remove('wp-rail');
   }, []);
+
+  // Folded is the default here too, so the server's HTML matches; a
+  // remembered unfold applies after mount.
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set());
+  useEffect(() => setOpenGroups(groupsOpen()), []);
+
+  const toggleGroup = (group: string) => {
+    const next = new Set(openGroups);
+    const opening = !next.has(group);
+    if (opening) next.add(group);
+    else next.delete(group);
+    setOpenGroups(next);
+    try {
+      if (opening) localStorage.setItem(groupKey(group), 'open');
+      else localStorage.removeItem(groupKey(group));
+    } catch {
+      /* storage unavailable */
+    }
+  };
 
   const toggle = () => {
     const next = !collapsed;
     setCollapsed(next);
     document.documentElement.classList.toggle('wp-rail-collapsed', next);
     try {
-      if (next) localStorage.setItem(RAIL_KEY, 'collapsed');
-      else localStorage.removeItem(RAIL_KEY);
+      if (next) localStorage.removeItem(RAIL_KEY);
+      else localStorage.setItem(RAIL_KEY, 'open');
     } catch {
       /* storage unavailable */
     }
@@ -148,27 +217,50 @@ export default function SideNav({ items, name }: { items: NavItem[]; name: strin
         {items.map((item, i) => {
           const here = isHere(pathname, item);
           // A section heading over the first menu of each run that shares
-          // one; folded, a rule stands in for it.
+          // one; with the rail folded, a rule stands in for it.
           const heads = item.group && item.group !== items[i - 1]?.group;
+          const folds = !!item.group && FOLDING.has(item.group);
+          const open = folds && openGroups.has(item.group!);
+          // A folded section still shows the page you are on, so the rail
+          // never loses track of where you are.
+          const shown = !folds || open || here;
           return (
             <div key={item.href} className="contents">
               {heads && (
                 <>
                   <hr className="mx-2 mt-2 border-0 border-t border-[var(--surface-border)]" />
-                  <p className="wp-rail-label mb-0 mt-1 px-3 text-xs font-semibold uppercase tracking-wide text-[var(--text-color-secondary)]">
-                    {item.group}
-                  </p>
+                  {folds ? (
+                    // Folded to icons, the chevron is the heading and its
+                    // name follows the pointer.
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(item.group!)}
+                      aria-expanded={open}
+                      aria-label={item.group}
+                      data-pr-tooltip={item.group}
+                      className="wp-rail-item mt-1 flex items-center gap-2 rounded-md border-0 bg-transparent px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-color-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-color)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-color)]"
+                    >
+                      <span className="wp-rail-label flex-1 text-left">{item.group}</span>
+                      <i className={`pi ${open ? 'pi-chevron-down' : 'pi-chevron-right'} shrink-0 text-xs`} aria-hidden />
+                    </button>
+                  ) : (
+                    <p className="wp-rail-label mb-0 mt-1 px-3 text-xs font-semibold uppercase tracking-wide text-[var(--text-color-secondary)]">
+                      {item.group}
+                    </p>
+                  )}
                 </>
               )}
-              <Link
-                href={item.href}
-                aria-current={here ? 'page' : undefined}
-                data-pr-tooltip={navRowLabel(item)}
-                className={`wp-rail-item ${navLinkClass(here)}`}
-              >
-                <i className={`${item.icon} shrink-0 text-base`} aria-hidden />
-                <span className="wp-rail-label truncate">{item.label}</span>
-              </Link>
+              {shown && (
+                <Link
+                  href={item.href}
+                  aria-current={here ? 'page' : undefined}
+                  data-pr-tooltip={navRowLabel(item)}
+                  className={`wp-rail-item ${navLinkClass(here)}`}
+                >
+                  <i className={`${item.icon} shrink-0 text-base`} aria-hidden />
+                  <span className="wp-rail-label truncate">{item.label}</span>
+                </Link>
+              )}
             </div>
           );
         })}

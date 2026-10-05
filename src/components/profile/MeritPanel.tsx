@@ -32,8 +32,8 @@ export default function MeritPanel({ merit, own }: { merit: Merit; own: boolean 
       </div>
       <p className="mt-2 text-sm text-[var(--text-color-secondary)]">
         {own
-          ? 'What a client can lean on when they read about you. It decides nothing — it does not gate entry, order the board, or pick a winner.'
-          : 'What this member has said about themselves, and what the portal watched them do. It decides nothing; the code decides the opportunity.'}
+          ? 'What a client can lean on when they read about you. It keeps you out only of an opportunity whose client set a higher minimum, and it orders the leaderboard; it never picks a winner — the work you hand in does.'
+          : 'What this member has said about themselves, and what the portal watched them do. It shuts a door only where an opportunity sets a minimum merit score, and it never picks a winner — the work they hand in does.'}
       </p>
 
       <Half

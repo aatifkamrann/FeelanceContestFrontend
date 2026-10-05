@@ -82,12 +82,39 @@ export type AdminSlowQueries = {
   items: AdminSlowQueryRow[];
 };
 
+/** Calls, tokens and the priced models' estimate; the estimate is null while no price is saved. */
+export type AdminAiUsageTotals = {
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number | null;
+};
+
+/** One feature's or one model's row; the estimate is null while any model on it is unpriced. */
+export type AdminAiUsageLine = AdminAiUsageTotals & { name: string };
+
+/** What the AI features cost: today and the last thirty days, by feature and by model. */
+export type AdminAiUsage = {
+  /** The first day of the window, "2026-09-02". */
+  fromDay: string;
+  today: AdminAiUsageTotals;
+  window: AdminAiUsageTotals;
+  byFeature: AdminAiUsageLine[];
+  byModel: AdminAiUsageLine[];
+  /** Models in the window with no price, which every estimate leaves out. */
+  unpriced: string[];
+  pricesSet: boolean;
+  dailyBudgetUsd: number | null;
+  dailyCallLimit: number;
+};
+
 export type AdminOperations = {
   generatedAtUtc: string;
   provisioning: AdminProvisionRow[];
   handovers: AdminHandoverRow[];
   deliveries: AdminDeliveryRow[];
   slowQueries: AdminSlowQueries;
+  aiUsage: AdminAiUsage;
 };
 
 export async function fetchOperations(): Promise<AdminOperations> {

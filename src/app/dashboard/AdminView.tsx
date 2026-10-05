@@ -45,7 +45,9 @@ const USERS = '/admin/users';
 const OPPORTUNITIES = '/reports/opportunities';
 const APPLICATIONS = '/reports/applications';
 const ENTRIES = '/reports/entries';
-const OPERATIONS = '/admin/operations';
+const REPO_HEALTH = '/admin/operations/repositories';
+const AWARD_HANDOVERS = '/admin/operations/awards';
+const WEBHOOKS = '/admin/operations/webhooks';
 
 /** Applications waiting: under review, on an opportunity still open. */
 const WAITING = { status: 'under_review', opportunityStatus: 'open' };
@@ -266,8 +268,8 @@ export default function AdminView({ data, lens }: { data: AdminDashboard; lens: 
         />
       </StatGrid>
 
-      {/* The things that silently break — each opens its panel in the
-          operations console, where it is unstuck. */}
+      {/* The things that silently break — each opens its page under
+          Operations, where it is unstuck. */}
       <StatGrid title="Portal health">
         <StatCard
           label="Repos failed"
@@ -286,7 +288,7 @@ export default function AdminView({ data, lens }: { data: AdminDashboard; lens: 
           icon="pi pi-exclamation-triangle"
           tone={h.reposFailed > 0 ? 'danger' : 'ok'}
           help="dashboard.repoHealth"
-          href={linkTo(OPERATIONS, {}, 'repositories')}
+          href={REPO_HEALTH}
         />
         <StatCard
           label="Handovers unverified"
@@ -295,7 +297,7 @@ export default function AdminView({ data, lens }: { data: AdminDashboard; lens: 
           icon="pi pi-send"
           tone={h.stuckHandovers > 0 ? 'danger' : 'ok'}
           help="dashboard.handoverStuck"
-          href={linkTo(OPERATIONS, {}, 'handovers')}
+          href={AWARD_HANDOVERS}
         />
         <StatCard
           label="Webhooks · 24h"
@@ -310,7 +312,7 @@ export default function AdminView({ data, lens }: { data: AdminDashboard; lens: 
           icon="pi pi-bolt"
           tone={h.unmatchedWebhooks > 0 ? 'warn' : 'ok'}
           help="dashboard.webhooks"
-          href={linkTo(OPERATIONS, {}, 'deliveries')}
+          href={WEBHOOKS}
         />
         <StatCard
           label="Settings"

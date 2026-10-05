@@ -76,6 +76,9 @@ export function patchInbox(queryClient: QueryClient, change: (line: InboxLine) =
 
 /** The PrimeIcons glyph for a kind of news; the bell for one nobody drew. */
 export function inboxIcon(kind: string): string {
+  if (kind === 'application_hired') return 'pi pi-briefcase';
+  if (kind === 'milestone_paid') return 'pi pi-wallet';
+  if (kind.startsWith('milestone')) return 'pi pi-flag';
   if (kind.startsWith('application')) return 'pi pi-inbox';
   if (kind.startsWith('award') || kind === 'winner_announced') return 'pi pi-trophy';
   if (kind === 'opportunity_open') return 'pi pi-megaphone';

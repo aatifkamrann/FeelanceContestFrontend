@@ -12,6 +12,7 @@ import { Tag } from 'primereact/tag';
 import { ConfirmDialog, confirmDialog } from 'primereact/confirmdialog';
 import Fold from '@/components/Fold';
 import HelpIcon from '@/components/HelpIcon';
+import { openChat } from '@/lib/chat';
 import RateExperience from '@/components/RateExperience';
 import PreviewPanel from '@/components/PreviewPanel';
 import { EntryDigestPanel, SpamScanPanel } from '@/components/ReviewAiTools';
@@ -26,6 +27,7 @@ import {
 import { brandingQuery, PORTAL_NAME, apiFetch, apiUrl } from '@/lib/api';
 import { decideApplication, statusLabel as applicationStatusLabel } from '@/lib/applications';
 import ApplicationsPanel from './ApplicationsPanel';
+import MilestonePayments from './MilestonePayments';
 import {
   aiStatusQuery,
   closesIn,
@@ -112,6 +114,33 @@ export default function OpportunityActions({
     const selecting = decision === 'selected';
     const from = opportunity?.applications?.find((r) => r.application.id === applicationId)?.application.status;
     const takingBack = !selecting && from === 'selected';
+    // Paid by milestone, selecting is hiring: one person, and the job is filled.
+    if (opportunity?.kind === 'milestones' && (selecting || takingBack)) {
+      confirmDialog({
+        header: selecting ? `Hire ${name}` : 'Take back the hire',
+        message: selecting
+          ? `${name} is hired for the whole job, paid milestone by milestone` +
+            `${repo ? ', and a private repository is set up for them that you can read as it grows' : ''}. ` +
+            'Everyone else still waiting is told the job was filled. You can take the hire back only before their work arrives.'
+          : `${name} is no longer hired${repo ? ', the repository made for them is archived,' : ''} and they are told. ` +
+            'The opportunity opens again for you to hire someone else. This works only before their work arrives.',
+        acceptLabel: selecting ? `Hire ${name}` : 'Take back the hire',
+        rejectLabel: selecting ? 'Keep reviewing' : 'Keep them hired',
+        accept: async () => {
+          setBusy(true);
+          setError(null);
+          try {
+            await decideApplication(applicationId, decision);
+            await refresh();
+          } catch (err) {
+            setError(err instanceof Error ? err.message : 'The decision could not be saved.');
+          } finally {
+            setBusy(false);
+          }
+        },
+      });
+      return;
+    }
     confirmDialog({
       header: selecting
         ? from === 'not_selected'
@@ -410,6 +439,71 @@ export default function OpportunityActions({
 
   // The winner's rail: payment status from their side of the deal, and —
   // once paid — the rating form. This outranks the generic "you're in" box.
+  if (opportunity?.award?.viewerIsWinner && opportunity.kind === 'milestones') {
+    const award = opportunity.award;
+    return (
+      <>
+        <ConfirmDialog />
+        <Box
+          title={
+            <>
+              <i className="pi pi-briefcase mr-2 text-[var(--primary-color)]" aria-hidden />
+              You are hired for this job
+            </>
+          }
+        >
+          {award.paidAtUtc ? (
+            <p className="mt-1 text-sm text-green-700 dark:text-green-400">
+              <i className="pi pi-check-circle mr-1" aria-hidden />
+              Paid in full{' '}
+              {new Date(award.paidAtUtc).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+            </p>
+          ) : (
+            <p className="mt-1 text-sm text-[var(--text-color-secondary)]">
+              Work through the milestones in order. Each one you hand in is reviewed, and the client pays you its
+              amount directly before the next one opens{repo ? '; the repository transfers to them after the last' : ''}.
+              They read where to pay you from Payout Setup on{' '}
+              <Link href="/profile" className="text-[var(--primary-color)]">
+                your profile
+              </Link>
+              .
+            </p>
+          )}
+          {opportunity.viewerEntry && (
+            <Button
+              label={`Message ${opportunity.clientName}`}
+              icon="pi pi-comments"
+              outlined
+              size="small"
+              className="mt-2"
+              onClick={() => openChat(opportunity.viewerEntry!.id)}
+            />
+          )}
+          <MilestonePayments opportunity={opportunity} role="hired" onChanged={refresh} />
+          {upload && opportunity.viewerEntry && (
+            <EntryUploads
+              entryId={opportunity.viewerEntry.id}
+              files={opportunity.viewerEntry.files}
+              milestones={opportunity.milestones}
+              uploadProblem={opportunity.viewerEntry.uploadProblem}
+              onChanged={refresh}
+              byMilestone
+            />
+          )}
+          {award.canRate && award.id && (
+            <RateExperience
+              awardId={award.id}
+              aboutName={opportunity.clientName}
+              existing={award.myRating}
+              onSaved={refresh}
+            />
+          )}
+          {error && <Message severity="error" text={error} className="mt-3 w-full" />}
+        </Box>
+      </>
+    );
+  }
+
   if (opportunity?.award?.viewerIsWinner) {
     const award = opportunity.award;
     return (
@@ -610,8 +704,20 @@ export default function OpportunityActions({
         )}
 
         {error && <Message severity="error" text={error} className="mt-3 w-full" />}
+        {/* The conversation with the client, in the dock at the corner:
+            open while the entry is, readable after. */}
+        <div className="mt-4 flex items-center">
+          <Button
+            label="Message the client"
+            icon="pi pi-comments"
+            outlined
+            size="small"
+            onClick={() => openChat(entry.id)}
+          />
+          <HelpIcon topic="chat.messages" label="Messages" />
+        </div>
         {open && (
-          <div className="mt-4 flex items-center">
+          <div className="mt-3 flex items-center">
             <Button
               label="Withdraw entry"
               severity="danger"
@@ -961,6 +1067,7 @@ function OwnerBox({
         {opportunity.applications && (
           <ApplicationsPanel
             rows={opportunity.applications}
+            hiring={opportunity.kind === 'milestones'}
             busy={busy}
             error={error}
             onDecide={onDecide}
@@ -996,8 +1103,9 @@ function OwnerBox({
                       <Avatar name={e.displayName} url={e.avatarUrl} size="xs" />
                       {e.displayName}
                     </span>
-                    <span className="text-xs text-[var(--text-color-secondary)]">
+                    <span className="flex items-center gap-1 text-xs text-[var(--text-color-secondary)]">
                       entered {relativeTime(e.enteredAtUtc)}
+                      {e.entryId && <MessageEntrant entryId={e.entryId} name={e.displayName} />}
                     </span>
                   </div>
                   <EntrantStandingLine
@@ -1086,8 +1194,9 @@ function OwnerBox({
                   <Avatar name={e.displayName} url={e.avatarUrl} size="xs" />
                   {e.displayName}
                 </p>
-                <span className="text-xs text-[var(--text-color-secondary)]">
+                <span className="flex items-center gap-1 text-xs text-[var(--text-color-secondary)]">
                   {e.milestonesDone?.length ?? 0}/{count(opportunity.milestones.length, 'milestone')}
+                  {e.entryId && <MessageEntrant entryId={e.entryId} name={e.displayName} />}
                 </span>
               </div>
               <EntrantStandingLine
@@ -1188,6 +1297,7 @@ function OwnerBox({
         {opportunity.applications && (
           <ApplicationsPanel
             rows={opportunity.applications}
+            hiring={opportunity.kind === 'milestones'}
             busy={busy}
             error={null}
             onDecide={onDecide}
@@ -1243,6 +1353,88 @@ function OwnerBox({
     );
   }
 
+  if (status === 'awarded' && award && opportunity.kind === 'milestones') {
+    const hiredRow = opportunity.applications?.find(
+      (r) => r.application.status === 'selected' && r.application.entryId === award.winnerEntryId,
+    );
+    const nothingHandedIn = (award.payments ?? []).every((p) => p.state === 'open' || p.state === 'locked');
+    return (
+      <Box
+        title={
+          <>
+            <i className="pi pi-briefcase mr-2 text-[var(--primary-color)]" aria-hidden />
+            {award.winnerName} is hired
+          </>
+        }
+      >
+        {award.winnerEntryId && (
+          <Button
+            label={`Message ${award.winnerName}`}
+            icon="pi pi-comments"
+            outlined
+            size="small"
+            className="mb-2 mt-1"
+            onClick={() => openChat(award.winnerEntryId!)}
+          />
+        )}
+        {!award.paidAtUtc && (
+          <p className="mt-1 text-sm text-[var(--text-color-secondary)]">
+            Each milestone they hand in waits on you: approve it or ask for changes, pay its amount directly, then
+            mark it paid — the next one opens only then.
+            {repo && connected && ' You can read the repository on GitHub as it grows.'}
+          </p>
+        )}
+        {award.winnerUserId && !award.paidAtUtc && (
+          <p className="mt-2 text-sm">
+            <Link
+              href={`/profile/${award.winnerUserId}#how-to-pay`}
+              className="font-medium text-[var(--primary-color)] no-underline hover:underline"
+            >
+              <i className="pi pi-wallet mr-1" aria-hidden />
+              How {award.winnerName} wants to be paid
+            </Link>
+            <span className="text-[var(--text-color-secondary)]"> — on their profile, shown to you now that you have hired them.</span>
+          </p>
+        )}
+        <MilestonePayments opportunity={opportunity} role="owner" onChanged={onRefresh} />
+        {award.paidAtUtc && (
+          <p className="mt-3 text-sm text-[var(--text-color-secondary)]">
+            {award.handover === 'verified'
+              ? 'Paid in full, and the repository is yours.'
+              : award.handover === 'requested'
+                ? `Paid in full. The repository's transfer to @${award.transferTargetLogin} is on its way — GitHub may hold it until you accept.`
+                : award.handoverNote ?? 'Paid in full.'}
+          </p>
+        )}
+        {upload && winner?.files && (
+          <div className="mt-3 border-t border-[var(--surface-border)] pt-3">
+            <p className="text-sm font-medium">{award.winnerName}&apos;s files</p>
+            <EntryFileGallery files={winner.files} showHelp />
+          </div>
+        )}
+        {/* Before any work arrives the hire can be taken back, and the job
+            opens again; after, the way out is a cancellation. */}
+        {!award.paidAtUtc && hiredRow && nothingHandedIn && (
+          <Button
+            label="Take back the hire"
+            icon="pi pi-undo"
+            size="small"
+            text
+            severity="secondary"
+            className="mt-2"
+            disabled={busy}
+            onClick={() => onDecide(hiredRow.application.id, 'not_selected', award.winnerName)}
+          />
+        )}
+        {award.canRate && award.id && (
+          <RateExperience awardId={award.id} aboutName={award.winnerName} existing={award.myRating} onSaved={onRefresh} />
+        )}
+        {error && <Message severity="error" text={error} className="mt-3 w-full" />}
+        {!award.paidAtUtc && <CancelPanel busy={busy} error={null} onCancel={onCancelOpportunity} />}
+      </Box>
+    );
+  }
+
   if (status === 'awarded' && award) {
     return (
       <Box
@@ -1253,7 +1445,17 @@ function OwnerBox({
         </>
         }
       >
-
+        {/* The handover is talked through here, before and after payment. */}
+        {award.winnerEntryId && (
+          <Button
+            label={`Message ${award.winnerName}`}
+            icon="pi pi-comments"
+            outlined
+            size="small"
+            className="mb-2 mt-1"
+            onClick={() => openChat(award.winnerEntryId!)}
+          />
+        )}
         {!award.paidAtUtc ? (
           <>
             <p className="mt-1 text-sm text-[var(--text-color-secondary)]">
@@ -1426,6 +1628,7 @@ function AdminBox({
       {opportunity.applications && (opportunity.status === 'open' || opportunity.status === 'reviewing') && (
         <ApplicationsPanel
           rows={opportunity.applications}
+          hiring={opportunity.kind === 'milestones'}
           busy={busy}
           error={error}
           onDecide={onDecide}
@@ -1740,5 +1943,25 @@ function RemovePanel({
         />
       </div>
     </div>
+  );
+}
+
+/**
+ * The conversation with one entrant, opened in the dock at the corner of
+ * the page — the client's end of the line the entrant has as "Message
+ * the client".
+ */
+function MessageEntrant({ entryId, name }: { entryId: string; name: string }) {
+  return (
+    <Button
+      icon="pi pi-comments"
+      text
+      rounded
+      size="small"
+      aria-label={`Message ${name}`}
+      tooltip={`Message ${name}`}
+      tooltipOptions={{ position: 'top' }}
+      onClick={() => openChat(entryId)}
+    />
   );
 }

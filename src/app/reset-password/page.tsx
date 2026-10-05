@@ -2,14 +2,13 @@
 
 import { Suspense, useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'next/navigation';
 import { Button } from 'primereact/button';
 import { Password } from 'primereact/password';
 import { Message } from 'primereact/message';
 import AuthShell from '@/components/AuthShell';
 import PasswordRules from '@/components/PasswordRules';
-import { ApiError, postJson } from '@/lib/opportunities';
+import { ApiError, postJson, startFreshAt } from '@/lib/opportunities';
 import { passwordAcceptable } from '@/lib/password';
 
 /**
@@ -18,8 +17,6 @@ import { passwordAcceptable } from '@/lib/password';
  * on the portal rather than on a second form asking for what they just typed.
  */
 function ResetForm() {
-  const router = useRouter();
-  const queryClient = useQueryClient();
   const token = useSearchParams().get('token');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -54,10 +51,9 @@ function ResetForm() {
     setBusy(true);
     setError(null);
     try {
+      // The reset signs the account in, so whoever this tab held before goes.
       await postJson('/api/auth/reset-password', { token, password });
-      await queryClient.invalidateQueries({ queryKey: ['me'] });
-      router.push('/opportunities');
-      router.refresh();
+      startFreshAt('/opportunities');
     } catch (err) {
       setError(
         err instanceof ApiError

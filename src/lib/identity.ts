@@ -1,4 +1,4 @@
-import { postJson, type IdentityStatus } from '@/lib/opportunities';
+import { ApiError, postJson, type IdentityStatus } from '@/lib/opportunities';
 import { apiFetch } from '@/lib/api';
 
 /** Where a member stands with the verification provider, and which of their doors ask for it. */
@@ -7,6 +7,10 @@ export type IdentityState = {
   verifiedAtUtc: string | null;
   /** The provider's reason category on a decline; null otherwise. */
   note: string | null;
+  /** The provider's page for a session started and not finished, while it may still be; null otherwise. */
+  continueUrl: string | null;
+  /** The page on this portal the last verification was started from; the return page goes back there. */
+  returnTo: string | null;
   /** Whether this portal verifies anybody at all. */
   enabled: boolean;
   /** Whether any of this member's doors asks. */
@@ -26,8 +30,26 @@ export const identityQuery = {
   staleTime: 10_000,
 };
 
-/** Opens a session with the provider; the browser goes to the URL and comes back to /verify/done. */
-export const startVerification = () => postJson<{ url: string }>('/api/identity/session');
+/**
+ * Opens a session with the provider, or hands back the member's unfinished
+ * one; the browser goes to the URL and comes back to /verify/done, which
+ * sends it on to returnTo — kept by the API, so any browser signed in as the
+ * member finds the way back.
+ */
+export const startVerification = (returnTo: string | null) =>
+  postJson<{ url: string; resumed: boolean }>('/api/identity/session', { returnTo });
+
+/**
+ * What a start button says when the start was refused: the API's own
+ * sentence where it has one; a 503 (no provider set up on this portal just
+ * now) and a network failure in the member's words, never a status code.
+ */
+export function startProblem(err: unknown): string {
+  if (err instanceof ApiError && err.status === 503)
+    return 'Identity verification is not available on this portal right now. Please try again later.';
+  if (err instanceof ApiError && !/^Request failed \(\d+\)$/.test(err.message)) return err.message;
+  return 'The verification provider could not be reached. Please try again in a few minutes.';
+}
 
 /** The verdict asked of the provider directly — for the member back before the webhook landed. */
 export const refreshVerification = () => postJson<IdentityState>('/api/identity/refresh');
@@ -43,10 +65,11 @@ export function safeNext(search: string): string | null {
 }
 
 // The provider sends every member back to the same /verify/done, with
-// nothing of ours on the address, so the way back to the door they came
-// from waits here while they are away. Local rather than session storage:
-// the provider may finish in another tab. A day is long enough for its
-// page and short enough that last week's door is not today's.
+// nothing of ours on the address. The API keeps the way back to the door
+// they came from (returnTo); this copy is only for a session started before
+// it did. Local rather than session storage: the provider may finish in
+// another tab. A day is long enough for its page and short enough that last
+// week's door is not today's.
 const RETURN_KEY = 'wp.verify.next';
 const RETURN_LIFE_MS = 24 * 60 * 60 * 1000;
 
@@ -60,7 +83,7 @@ export function rememberReturn(next: string | null): void {
   }
 }
 
-/** The way back the return page offers: its own ?next= first, else what the verify page kept. */
+/** The way back the return page offers when the API has none: its own ?next= first, else what the verify page kept. */
 export function returnPath(search: string): string | null {
   const own = safeNext(search);
   if (own) return own;

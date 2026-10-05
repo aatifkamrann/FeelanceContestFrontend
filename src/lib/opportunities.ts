@@ -18,6 +18,8 @@ export type OpportunityCard = {
   status: string;
   /** Repository, upload or both — said on the card, because it decides who can enter. */
   delivery: OpportunityDelivery;
+  /** Competitive, or one hired freelancer paid milestone by milestone — said on the card. */
+  kind: OpportunityKind;
   /** Entries must run with Docker Compose: every claim is built, and the board says whether it did. */
   requiresCompose: boolean;
   clientName: string;
@@ -203,6 +205,40 @@ export const categoriesQuery = {
  * deck; both is a build that comes with files.
  */
 export type OpportunityDelivery = 'repository' | 'upload' | 'both';
+
+/**
+ * How an opportunity pays (Opportunities/MilestonePay.cs): competitive — many
+ * build, one winner is paid — or one hired freelancer, paid milestone by
+ * milestone, each approved and paid before the next opens.
+ */
+export type OpportunityKind = 'competitive' | 'milestones';
+
+/** Where one milestone of an opportunity paid by milestone stands. */
+export type MilestonePayState = 'locked' | 'open' | 'submitted' | 'changes_requested' | 'approved' | 'paid';
+
+/** One milestone's review and payment; the ids and notes only for the owner and the hired freelancer. */
+export type MilestonePayment = {
+  number: number;
+  state: MilestonePayState;
+  amount: number | null;
+  submittedAtUtc: string | null;
+  approvedAtUtc: string | null;
+  paidAtUtc: string | null;
+  checkpointId: string | null;
+  ref: string | null;
+  changesNote: string | null;
+  changesRequestedAtUtc: string | null;
+};
+
+/** A payment state as a person reads it. */
+export const PAY_STATE_LABEL: Record<MilestonePayState, string> = {
+  locked: 'Not open yet',
+  open: 'In progress',
+  submitted: 'Handed in',
+  changes_requested: 'Changes asked for',
+  approved: 'Approved — payment due',
+  paid: 'Paid',
+};
 
 export const usesRepo = (d: OpportunityDelivery) => d === 'repository' || d === 'both';
 export const usesUpload = (d: OpportunityDelivery) => d === 'upload' || d === 'both';
@@ -435,6 +471,10 @@ export type OpportunityAward = {
   handoverVerifiedAtUtc: string | null;
   handoverNote: string | null;
   winnerRepoFullName: string | null;
+  /** Paid by milestone: each milestone's review and payment, in order; null on a competitive opportunity. */
+  payments: MilestonePayment[] | null;
+  amountPaid: number | null;
+  amountOwed: number | null;
 };
 
 /** A brief file. Metadata is public; the bytes sit behind the signed-in download. */
@@ -446,6 +486,8 @@ export type OpportunityMilestone = {
   dueUtc: string | null;
   /** This milestone's share of the work in percent, or null on a checklist that states none. */
   weightPercent: number | null;
+  /** What it pays, paid by milestone; null on a competitive opportunity. */
+  amount: number | null;
 };
 
 /** One row of the technical requirements table: the constraint, and what it asks for. */
@@ -476,6 +518,7 @@ export type OpportunityDetail = {
   status: string;
   /** Repository, upload or both — every role-specific panel branches on this before saying "repo". */
   delivery: OpportunityDelivery;
+  kind: OpportunityKind;
   requiresCompose: boolean;
   deadlineUtc: string | null;
   /** The last joining date, already resolved: null on the row means the deadline. */
@@ -709,6 +752,21 @@ export const meQuery = {
   staleTime: 60_000,
 };
 
+/**
+ * Where to go once the signed-in account has changed — a sign-in, a sign-out,
+ * a new account confirmed, a reset that signs in — as a new page load, never
+ * a client-side move. Everything the last account's pages read (its profile,
+ * its verification link, its inbox, its applications) sits in this tab's
+ * query cache under keys that name no account, and forms seed themselves
+ * from it once: a client-side move handed the next account the last one's
+ * profile form, headline and bio filled in, ready to be saved as its own.
+ * A page load starts the cache, the forms and the live connection from
+ * nothing, as the new account.
+ */
+export function startFreshAt(path: string): void {
+  window.location.assign(path);
+}
+
 /** Which AI features this portal may offer — panels for off features never render. */
 export type AiStatus = {
   enabled: boolean;
@@ -741,7 +799,9 @@ export type AiStatus = {
 /**
  * The opportunity form as the form-reading AI tools receive it — the whole
  * form on every request, saved or not, in the API's `OpportunityFormSnapshot`
- * shape. No award and no dates: nothing drafts money or a schedule.
+ * shape. No dates, and the award only paid by milestone — the total the
+ * milestone draft splits; null otherwise, so it changes nothing a
+ * competitive form's drafts read.
  */
 export type OpportunityFormSnapshot = {
   title: string;
@@ -754,6 +814,8 @@ export type OpportunityFormSnapshot = {
   requiresCompose: boolean;
   milestones: { title: string; description: string }[];
   criteria: { points: number | null; title: string; description: string }[];
+  kind: OpportunityKind;
+  awardAmount: number | null;
 };
 
 /** The six tools that read the opportunity form, by the slug each is asked at. */
@@ -773,9 +835,9 @@ export const FORM_READS: Record<FormFeature, (keyof OpportunityFormSnapshot)[]> 
   categorise: ['title', 'briefMarkdown'],
   // The coach reviews the whole form: contradictions between the brief
   // and the terms set beside it are exactly what it is for.
-  coach: ['title', 'briefMarkdown', 'category', 'subcategory', 'skills', 'requirements', 'delivery', 'requiresCompose', 'milestones', 'criteria'],
+  coach: ['title', 'briefMarkdown', 'category', 'subcategory', 'skills', 'requirements', 'delivery', 'requiresCompose', 'milestones', 'criteria', 'kind', 'awardAmount'],
   requirements: ['title', 'briefMarkdown', 'category', 'subcategory', 'skills'],
-  milestones: ['title', 'briefMarkdown', 'category', 'subcategory', 'skills', 'requirements', 'delivery', 'requiresCompose'],
+  milestones: ['title', 'briefMarkdown', 'category', 'subcategory', 'skills', 'requirements', 'delivery', 'requiresCompose', 'kind', 'awardAmount'],
   criteria: ['title', 'briefMarkdown', 'category', 'subcategory', 'requirements', 'delivery', 'requiresCompose', 'milestones'],
   seo: ['title', 'briefMarkdown', 'category', 'subcategory'],
 };
@@ -797,6 +859,23 @@ export const aiStatusQuery = {
   queryKey: ['ai-status'] as const,
   queryFn: async (): Promise<AiStatus | null> => {
     const res = await apiFetch('/api/ai/status');
+    if (!res.ok) return null;
+    return res.json();
+  },
+  staleTime: 60_000,
+};
+
+/**
+ * Whether Docker Compose builds are on: a build host is switched on and
+ * has passed its test. While they are off the form does not offer the
+ * requirement at all, and the API refuses it.
+ */
+export type BuildHostStatus = { ready: boolean };
+
+export const buildHostQuery = {
+  queryKey: ['build-host-status'] as const,
+  queryFn: async (): Promise<BuildHostStatus | null> => {
+    const res = await apiFetch('/api/build-host/status');
     if (!res.ok) return null;
     return res.json();
   },

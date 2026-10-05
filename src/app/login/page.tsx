@@ -3,14 +3,14 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Button } from 'primereact/button';
 import { Checkbox } from 'primereact/checkbox';
 import { InputText } from 'primereact/inputtext';
 import { Password } from 'primereact/password';
 import { Message } from 'primereact/message';
 import AuthShell from '@/components/AuthShell';
-import { ApiError, meQuery, postJson } from '@/lib/opportunities';
+import { ApiError, meQuery, postJson, startFreshAt } from '@/lib/opportunities';
 
 /**
  * Where to go after signing in. A page that needs a session sends people
@@ -27,7 +27,6 @@ function safeNext(): string {
 
 export default function LoginPage() {
   const router = useRouter();
-  const queryClient = useQueryClient();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
@@ -59,9 +58,8 @@ export default function LoginPage() {
     setError(null);
     try {
       await postJson('/api/auth/login', { email, password, rememberMe });
-      await queryClient.invalidateQueries({ queryKey: ['me'] });
-      router.push(safeNext());
-      router.refresh();
+      // Busy stays set: the page is leaving, and the form must not come back.
+      startFreshAt(safeNext());
     } catch (err) {
       // Only a 401 means the credentials were wrong. Anything else — the
       // API down, the network gone — must not be blamed on the password.

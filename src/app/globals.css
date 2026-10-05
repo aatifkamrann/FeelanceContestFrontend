@@ -1325,3 +1325,62 @@ i.pi:has(+ .p-inputtext:focus) {
     max-width: 2.5rem;
   }
 }
+
+/* The conversations dock at the foot of every page: the round button at
+ * the corner, and above it the panel — a card the size of a phone screen,
+ * which on a phone is the screen. Under PrimeReact's dialogs (1100 and
+ * up), over the page and its sticky bits.
+ */
+.wp-chat-dock {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+.wp-chat-button.p-button {
+  width: 3.25rem;
+  height: 3.25rem;
+  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 0.18);
+}
+.wp-chat-button.p-button > .p-button-icon {
+  font-size: 1.25rem;
+}
+.wp-chat-panel {
+  width: 22.5rem;
+  max-width: calc(100vw - 2rem);
+  height: 32rem;
+  max-height: calc(100vh - 6rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface-card);
+  color: var(--text-color);
+  border: 1px solid var(--surface-border);
+  border-radius: 0.75rem;
+  box-shadow: 0 1rem 2.5rem rgb(0 0 0 / 0.22);
+}
+.wp-chat-panel > * {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+@media (max-width: 480px) {
+  .wp-chat-dock {
+    right: 0.75rem;
+    bottom: 0.75rem;
+  }
+  .wp-chat-panel {
+    max-height: calc(100vh - 5.5rem);
+  }
+}
+/* The panel's own X and the close in the button follow the one close set. */
+.wp-chat-close.p-button.p-button-text {
+  color: var(--text-color-secondary);
+}
+.wp-chat-close.p-button.p-button-text:enabled:hover,
+.wp-chat-close.p-button.p-button-text:focus-visible {
+  color: var(--primary-color);
+}

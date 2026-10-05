@@ -308,6 +308,9 @@ function download(blob: Blob, name: string) {
 
 const stamp = () => new Date().toISOString().slice(0, 10);
 
+/** "Oct 1, 2026, 11:06 PM", as this browser writes it. */
+const timeLabel = (d: Date) => d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
 function csvOf<R>(rows: Grouped<R>[], cols: ReportColumn<R>[], grouped: boolean): string {
   const quote = (s: string) => `"${s.replace(/"/g, '""')}"`;
   const head = [...(grouped ? ['Group'] : []), ...cols.map((c) => c.header)];
@@ -453,7 +456,8 @@ export default function ReportScreen<R extends { id: string }>(props: ReportScre
   const fits = (only?: ReportScope[]) => !only || only.includes(scope);
   const panelKey = `wp.report.${file}.filters`;
 
-  const [panelCollapsed, setPanelCollapsed] = useState(false);
+  // Folded is the default, so the server render matches most viewers.
+  const [panelCollapsed, setPanelCollapsed] = useState(true);
   const [q, setQ] = useState('');
   const [filters, setFilters] = useState<DataTableFilterMeta>(() => initialFilters(columns));
   const [sortMeta, setSortMeta] = useState<DataTableSortMeta[]>(props.defaultSort);
@@ -466,19 +470,35 @@ export default function ReportScreen<R extends { id: string }>(props: ReportScre
   const [busy, setBusy] = useState<string | null>(null);
 
   // Whether the filters are folded is how this person lays out this
-  // screen — remembered on the device, like the rail.
+  // screen — remembered on the device, like the rail. Like the rail they
+  // start folded (since 1 October 2026) and an unfold is what is kept, so
+  // an older 'collapsed' reads as folded too. The header's count says when
+  // filters are on, a link's included, with the panel shut.
   useEffect(() => {
     try {
-      setPanelCollapsed(localStorage.getItem(panelKey) === 'collapsed');
+      setPanelCollapsed(localStorage.getItem(panelKey) !== 'open');
     } catch {
       /* storage unavailable */
     }
   }, [panelKey]);
+  // When the sheet was drawn, by the reader's own clock. The server renders
+  // this screen too, in its own time zone, so a time written while
+  // rendering never matches the browser's and React throws the server's
+  // page away. It is set after mount instead, and again as the browser
+  // prints, so the paper says when it was printed.
+  const [printedAt, setPrintedAt] = useState<Date | null>(null);
+  useEffect(() => {
+    const now = () => setPrintedAt(new Date());
+    now();
+    window.addEventListener('beforeprint', now);
+    return () => window.removeEventListener('beforeprint', now);
+  }, []);
+
   const togglePanel = (collapsed: boolean) => {
     setPanelCollapsed(collapsed);
     try {
-      if (collapsed) localStorage.setItem(panelKey, 'collapsed');
-      else localStorage.removeItem(panelKey);
+      if (collapsed) localStorage.removeItem(panelKey);
+      else localStorage.setItem(panelKey, 'open');
     } catch {
       /* storage unavailable */
     }
@@ -565,7 +585,9 @@ export default function ReportScreen<R extends { id: string }>(props: ReportScre
   }
 
   const title = `${name} report`;
-  const subtitle = `${visible.length} of ${rows.length} ${whose} · ${grouped ? `grouped by ${group!.label.toLowerCase()} · ` : ''}${new Date().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`;
+  const tally = `${visible.length} of ${rows.length} ${whose} · ${grouped ? `grouped by ${group!.label.toLowerCase()} · ` : ''}`;
+  // An export is made in the browser, at the moment it is asked for.
+  const subtitle = () => `${tally}${timeLabel(new Date())}`;
   const activeCount = panel.active + (q ? 1 : 0);
   const narrowed = activeCount > 0 || Object.values(filters).some((m) => (m as DataTableFilterMetaData).value);
 
@@ -581,7 +603,7 @@ export default function ReportScreen<R extends { id: string }>(props: ReportScre
     setBusy('xlsx');
     try {
       download(
-        await excelOf(buildSheet(visible, cols, grouped, noun), cols, name, title, subtitle, noun, portalName),
+        await excelOf(buildSheet(visible, cols, grouped, noun), cols, name, title, subtitle(), noun, portalName),
         `${file}-${stamp()}.xlsx`,
       );
       say(`${visible.length} rows to Excel`);
@@ -594,7 +616,7 @@ export default function ReportScreen<R extends { id: string }>(props: ReportScre
   const exportPdf = async () => {
     setBusy('pdf');
     try {
-      download(await pdfOf(buildSheet(visible, cols, grouped, noun), cols, title, subtitle, noun), `${file}-${stamp()}.pdf`);
+      download(await pdfOf(buildSheet(visible, cols, grouped, noun), cols, title, subtitle(), noun), `${file}-${stamp()}.pdf`);
       say(`${visible.length} rows to PDF`);
     } catch (e) {
       fail('PDF export failed', e);
@@ -829,7 +851,10 @@ export default function ReportScreen<R extends { id: string }>(props: ReportScre
           plain table, without the chrome around it. */}
       <section className="hidden p-6 print:block" aria-hidden>
         <h1 className="text-xl font-semibold">{title}</h1>
-        <p className="text-sm text-gray-600">{subtitle}</p>
+        <p className="text-sm text-gray-600">
+          {tally}
+          {printedAt && timeLabel(printedAt)}
+        </p>
         <table className="mt-4 w-full border-collapse text-[11px]">
           <thead>
             <tr>

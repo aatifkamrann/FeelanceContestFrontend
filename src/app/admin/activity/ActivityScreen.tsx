@@ -98,14 +98,21 @@ export default function ActivityScreen() {
   const [visitor, setVisitor] = useState<string | null>(null);
   const [first, setFirst] = useState(0);
 
-  // The Users screen links here with ?user=<id>; read once, on mount
-  // (window.location, not useSearchParams — no Suspense boundary needed).
+  // The Users screen links here with ?user=<id>, a conversation's "Who
+  // read this" with ?q=<entry>; read once, on mount (window.location, not
+  // useSearchParams — no Suspense boundary needed).
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
       const u = params.get('user');
       if (u) {
         setUserId(u);
+        setRange('all');
+      }
+      const words = params.get('q');
+      if (words) {
+        setQ(words);
+        setNeedle(words.trim());
         setRange('all');
       }
     } catch {
@@ -633,7 +640,7 @@ function ExchangeText({ title, text }: { title: string; text: string | null }) {
         </pre>
       ) : (
         <p className="m-0 px-3 py-2 text-xs text-[var(--text-color-secondary)]">
-          Not kept — cleared when the account was erased, or never recorded.
+          Not kept — cleared by the AI body retention or when the account was erased, or never recorded.
         </p>
       )}
     </section>

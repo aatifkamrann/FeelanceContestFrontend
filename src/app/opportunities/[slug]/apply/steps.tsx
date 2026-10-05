@@ -632,7 +632,13 @@ export function AvailabilityStep({ ctx, draft, set, onBack, onNext }: StepProps)
   const confirmations: { key: 'dedicateTime' | 'onSchedule' | 'competitive' | 'originalWork'; text: string }[] = [
     { key: 'dedicateTime', text: 'I can dedicate the required time' },
     { key: 'onSchedule', text: 'I can complete milestones on schedule' },
-    { key: 'competitive', text: 'I understand this is a competitive project' },
+    {
+      key: 'competitive',
+      text:
+        c.kind === 'milestones'
+          ? 'I understand one freelancer is hired, and each milestone is paid once the client approves it'
+          : 'I understand this is a competitive project',
+    },
     { key: 'originalWork', text: 'I agree to submit original work' },
   ];
   return (
@@ -640,7 +646,11 @@ export function AvailabilityStep({ ctx, draft, set, onBack, onNext }: StepProps)
       <StepHeading
         eyebrow="Availability & Commitment"
         title="Confirm You Can Deliver"
-        lede="This protects the competition from unreliable applicants."
+        lede={
+          c.kind === 'milestones'
+            ? 'The client hires one person for the whole job; this is what they rely on.'
+            : 'This protects the competition from unreliable applicants.'
+        }
         help={<HelpIcon topic="apply.availability" label="What is saved here" />}
       />
       <Figures

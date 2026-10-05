@@ -30,6 +30,7 @@ export function EntryUploads({
   milestones,
   uploadProblem,
   onChanged,
+  byMilestone = false,
 }: {
   entryId: string;
   files: EntryFile[];
@@ -37,6 +38,8 @@ export function EntryUploads({
   /** Why another file may not land now, or null while uploads are open. */
   uploadProblem: string | null;
   onChanged: () => Promise<void>;
+  /** Paid by milestone: a tagged file hands the milestone in, and the client reads files as they land. */
+  byMilestone?: boolean;
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<string | null>(null); // filename mid-upload, or 'delete'
@@ -92,7 +95,9 @@ export function EntryUploads({
       </p>
       <p className="mt-1 text-sm text-[var(--text-color-secondary)]">
         {open
-          ? 'Hand your work in here. Tag a file to a milestone to claim it on the board. Nobody but you opens these before the deadline.'
+          ? byMilestone
+            ? 'Hand each milestone in here: tag the file with it, and the client reviews it. The client can open your files as you go.'
+            : 'Hand your work in here. Tag a file to a milestone to claim it on the board. Nobody but you opens these before the deadline.'
           : uploadProblem}
       </p>
 

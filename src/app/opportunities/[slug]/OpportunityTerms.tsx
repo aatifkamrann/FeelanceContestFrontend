@@ -96,14 +96,27 @@ export function RequirementsTab({
 
 /**
  * The Milestones tab: one highlighted box per milestone, its share of the
- * work at the top right where the checklist states shares.
+ * work at the top right where the checklist states shares — or, paid by
+ * milestone, what it pays.
  */
-export function MilestonesTab({ milestones, dated }: { milestones: OpportunityMilestone[]; dated: boolean }) {
+export function MilestonesTab({
+  milestones,
+  dated,
+  currency = 'USD',
+}: {
+  milestones: OpportunityMilestone[];
+  dated: boolean;
+  currency?: string;
+}) {
   const shared = milestones.some((m) => m.weightPercent != null);
+  const paid = milestones.some((m) => m.amount != null);
+  const money = (n: number) => `${n.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${currency}`;
   return (
     <>
       <p className="text-sm text-[var(--text-color-secondary)]">
-        This list becomes every entrant&apos;s progress board.
+        {paid
+          ? 'One freelancer is hired and works through these in order. Each is handed in, approved and paid its amount before the next one opens.'
+          : 'This list becomes every entrant’s progress board.'}
         {shared && ' The percentage is each milestone’s share of the work.'}
       </p>
       <ol className="mt-3 flex flex-col gap-3">
@@ -115,7 +128,11 @@ export function MilestonesTab({ milestones, dated }: { milestones: OpportunityMi
             <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--primary-color)] text-xs font-bold text-[var(--primary-color-text)]">
               {i + 1}
             </span>
-            <div className={m.weightPercent != null ? 'min-w-0 flex-1 pr-14' : 'min-w-0 flex-1'}>
+            <div
+              className={
+                m.amount != null ? 'min-w-0 flex-1 pr-28' : m.weightPercent != null ? 'min-w-0 flex-1 pr-14' : 'min-w-0 flex-1'
+              }
+            >
               <p className="font-medium">{m.title}</p>
               {m.description && (
                 <p className="text-sm text-[var(--text-color-secondary)]">{m.description}</p>
@@ -128,6 +145,14 @@ export function MilestonesTab({ milestones, dated }: { milestones: OpportunityMi
                 {m.dueUtc ? `Due by ${utcMoment(m.dueUtc)}` : 'No due date'}
               </p>
             </div>
+            {m.amount != null && (
+              <span
+                className="absolute right-3 top-3 rounded-full bg-[color-mix(in_srgb,var(--primary-color)_12%,transparent)] px-2 py-0.5 text-xs font-semibold tabular-nums text-[var(--primary-color)]"
+                title={`Pays ${money(m.amount)} once approved`}
+              >
+                {money(m.amount)}
+              </span>
+            )}
             {m.weightPercent != null && (
               <span
                 className="absolute right-3 top-3 rounded-full bg-[color-mix(in_srgb,var(--primary-color)_12%,transparent)] px-2 py-0.5 text-xs font-semibold tabular-nums text-[var(--primary-color)]"

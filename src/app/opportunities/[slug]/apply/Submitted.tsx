@@ -62,6 +62,8 @@ export default function Submitted({
       ? 'pi-ban text-red-600 dark:text-red-400'
       : a.status === 'selected' && a.outcome === 'won'
         ? 'pi-trophy text-[var(--primary-color)]'
+        : a.status === 'selected' && a.outcome === 'hired'
+          ? 'pi-briefcase text-[var(--primary-color)]'
         : a.status === 'not_selected' || (a.status === 'selected' && a.outcome === 'lost')
           ? 'pi-flag text-[var(--text-color-secondary)]'
           : a.status === 'selected' && a.outcome === 'cancelled'
@@ -270,6 +272,7 @@ const SELECTED_LEDE: Record<ApplicationOutcome, string> = {
   open: 'You were selected — you are in the opportunity.',
   reviewing: 'You were selected, and the competition is now in review.',
   won: 'You were selected, and your entry won.',
+  hired: 'The client hired you for the job.',
   lost: 'You were selected; the award went to another entrant.',
   cancelled: 'You were selected; the client then cancelled the opportunity.',
 };
@@ -304,6 +307,17 @@ function SelectedPanel({
           are emailed the result either way.
         </p>
         <OpportunityButton slug={slug} />
+      </Panel>
+    );
+  if (outcome === 'hired')
+    return (
+      <Panel tone="good">
+        <p className="text-lg font-bold">You Are Hired</p>
+        <p className="mt-2 text-sm">
+          The client hired you for the whole job. Hand the milestones in one at a time on the opportunity page; each is
+          approved and paid before the next one opens{repo ? ', and the repository transfers to them after the last' : ''}.
+        </p>
+        <OpportunityButton slug={slug} severity="success" />
       </Panel>
     );
   if (outcome === 'won')

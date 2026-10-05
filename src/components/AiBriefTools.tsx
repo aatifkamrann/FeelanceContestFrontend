@@ -16,7 +16,7 @@ import type { EditorCriterion, EditorMilestone, EditorRequirement, EditorValue }
 import { utcMoment, type OpportunityCategoryDef, type OpportunityFormSnapshot } from '@/lib/opportunities';
 
 type CoachOutput = { flags: { severity: 'info' | 'warn'; issue: string; suggestion: string | null }[] };
-type MilestonesOutput = { milestones: { title: string; description: string | null }[] };
+type MilestonesOutput = { milestones: { title: string; description: string | null; amount?: number | null }[] };
 type RequirementsOutput = { requirements: { title: string; detail: string }[] };
 type CriteriaOutput = { criteria: { title: string; points: number; description: string | null }[] };
 type SeoOutput = { title: string; description: string };
@@ -38,7 +38,10 @@ type CategoryOutput = {
  * press or ignores it.
  */
 
-/** The form as the tools receive it: the fields they may read, nothing about money or dates. */
+/**
+ * The form as the tools receive it: the fields they may read, no dates, and
+ * money only paid by milestone — the total the milestone draft splits.
+ */
 export function toSnapshot(value: EditorValue): OpportunityFormSnapshot {
   return {
     title: value.title,
@@ -51,6 +54,8 @@ export function toSnapshot(value: EditorValue): OpportunityFormSnapshot {
     requiresCompose: value.requiresCompose,
     milestones: value.milestones.map((m) => ({ title: m.title, description: m.description })),
     criteria: value.criteria.map((c) => ({ points: c.points, title: c.title, description: c.description })),
+    kind: value.kind,
+    awardAmount: value.kind === 'milestones' ? value.awardAmount : null,
   };
 }
 
@@ -269,8 +274,8 @@ export function AiMilestonesDraft({
   onUse,
 }: {
   form: OpportunityFormSnapshot;
-  /** The form's own arithmetic: a drafted list, dated and shared from the opportunity schedule. */
-  plan: (drafted: { title: string; description: string }[]) => EditorMilestone[];
+  /** The form's own arithmetic: a drafted list, dated and shared from the opportunity schedule — paid by milestone, its amounts fitted to the total. */
+  plan: (drafted: { title: string; description: string; amount?: number | null }[]) => EditorMilestone[];
   onUse: (milestones: EditorMilestone[]) => void;
 }) {
   const { draft, output, ask, busy, error, tooThin, read } = useFormDraft<MilestonesOutput>('milestones', form);
@@ -279,9 +284,11 @@ export function AiMilestonesDraft({
   // every render, so a deadline changed after the draft was read is already
   // in the list below before anybody takes it.
   const planned = plan(
-    (output?.milestones ?? []).map((m) => ({ title: m.title, description: m.description ?? '' })),
+    (output?.milestones ?? []).map((m) => ({ title: m.title, description: m.description ?? '', amount: m.amount ?? null })),
   );
   const dated = planned.some((m) => m.dueUtc);
+  const paidBy = form.kind === 'milestones';
+  const priced = planned.some((m) => m.amount != null);
   const fold = useSuggestionFold(draft);
 
   return (
@@ -309,7 +316,11 @@ export function AiMilestonesDraft({
                   )}
                 </p>
                 <p className="text-xs tabular-nums text-[var(--text-color-secondary)]">
-                  {m.weightPercent}% of the work
+                  {paidBy
+                    ? m.amount != null
+                      ? `pays $${m.amount.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+                      : 'no amount yet'
+                    : `${m.weightPercent}% of the work`}
                   {m.dueUtc && ` · due ${utcMoment(m.dueUtc)}`}
                 </p>
               </li>
@@ -318,9 +329,16 @@ export function AiMilestonesDraft({
           {/* Where the numbers came from, since the model did not write them:
               the schedule the client set further up this form. */}
           <p className="mt-2 text-xs text-[var(--text-color-secondary)]">
-            {dated
-              ? 'Dates are spread evenly from the start to the deadline, the last step landing on it; shares are an even split. Both are yours to change above.'
-              : 'Shares are an even split. Set a deadline under Award and dates and the steps come back dated.'}
+            {paidBy
+              ? (priced
+                  ? 'The amounts are the model’s split of your total by the work each step takes, fitted to add up to it exactly — a suggestion, not a price it knows. '
+                  : 'Set the total under Award and dates and the steps come back with amounts. ') +
+                (dated
+                  ? 'Dates are spread evenly from the start to the deadline. All of it is yours to change above.'
+                  : 'Set a deadline and the steps come back dated.')
+              : dated
+                ? 'Dates are spread evenly from the start to the deadline, the last step landing on it; shares are an even split. Both are yours to change above.'
+                : 'Shares are an even split. Set a deadline under Award and dates and the steps come back dated.'}
           </p>
           <Button
             label="Use these — I&apos;ll edit them above"

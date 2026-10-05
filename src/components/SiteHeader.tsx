@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { usePathname } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { Button } from 'primereact/button';
 import Avatar from '@/components/Avatar';
 import BrandMark from '@/components/BrandMark';
@@ -11,7 +11,7 @@ import NotificationBell from '@/components/NotificationBell';
 import SideNav, { isHere, navItemsFor, navLinkClass, navRowLabel } from '@/components/SideNav';
 import ThemeControls from '@/components/ThemeControls';
 import { brandingQuery, PORTAL_NAME } from '@/lib/api';
-import { meQuery, postJson } from '@/lib/opportunities';
+import { meQuery, postJson, startFreshAt } from '@/lib/opportunities';
 import { legalLinks } from '@/lib/terms';
 
 /**
@@ -21,8 +21,6 @@ import { legalLinks } from '@/lib/terms';
  * else sign in / join.
  */
 export default function SiteHeader() {
-  const router = useRouter();
-  const queryClient = useQueryClient();
   const { data: me, isLoading } = useQuery(meQuery);
   const { data: publicInfo } = useQuery(brandingQuery);
   // The configured name, from the one read the root layout makes and seeds
@@ -42,9 +40,7 @@ export default function SiteHeader() {
 
   const signOut = async () => {
     await postJson('/api/auth/logout');
-    await queryClient.invalidateQueries({ queryKey: ['me'] });
-    router.push('/');
-    router.refresh();
+    startFreshAt('/');
   };
 
   return (

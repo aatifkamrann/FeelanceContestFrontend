@@ -1,12 +1,12 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Button } from 'primereact/button';
 import { Dialog } from 'primereact/dialog';
 import ConfirmCodeForm, { VERIFY_TITLE, verifyLede } from '@/components/ConfirmCodeForm';
 import { brandingQuery } from '@/lib/api';
-import { meQuery, postJson } from '@/lib/opportunities';
+import { meQuery, postJson, startFreshAt } from '@/lib/opportunities';
 
 /**
  * Meets an account that never entered its code — somebody who closed the
@@ -25,7 +25,6 @@ import { meQuery, postJson } from '@/lib/opportunities';
 export default function ConfirmGate() {
   const router = useRouter();
   const pathname = usePathname();
-  const queryClient = useQueryClient();
   const { data: me } = useQuery(meQuery);
   const { data: branding } = useQuery(brandingQuery);
 
@@ -33,9 +32,7 @@ export default function ConfirmGate() {
 
   const signOut = async () => {
     await postJson('/api/auth/logout');
-    await queryClient.invalidateQueries({ queryKey: ['me'] });
-    router.push('/');
-    router.refresh();
+    startFreshAt('/');
   };
 
   return (

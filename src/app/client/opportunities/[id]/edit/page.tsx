@@ -49,6 +49,7 @@ export default function EditOpportunityPage({ params }: { params: Promise<{ id: 
         title: detail.title,
         briefMarkdown: detail.briefMarkdown,
         awardAmount: detail.awardAmount,
+        kind: detail.kind,
         delivery: detail.delivery,
         requiresCompose: detail.requiresCompose,
         deadlineUtc: detail.deadlineUtc,
@@ -62,6 +63,7 @@ export default function EditOpportunityPage({ params }: { params: Promise<{ id: 
           description: m.description ?? '',
           dueUtc: m.dueUtc,
           weightPercent: m.weightPercent,
+          amount: m.amount,
         })),
         requirements: detail.requirements.map((r) => ({ title: r.title, detail: r.detail })),
         criteria: detail.criteria.map((c) => ({

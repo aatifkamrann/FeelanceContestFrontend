@@ -68,6 +68,7 @@ export default function OpportunityPreview({ value }: { value: EditorValue }) {
       description: m.description.trim() === '' ? null : m.description,
       dueUtc: m.dueUtc ?? null,
       weightPercent: m.weightPercent ?? null,
+      amount: value.kind === 'milestones' ? m.amount ?? null : null,
     }));
   const dated = milestones.some((m) => m.dueUtc);
   const requirements = value.requirements.filter((r) => r.title.trim() !== '' || r.detail.trim() !== '');
@@ -204,7 +205,7 @@ export default function OpportunityPreview({ value }: { value: EditorValue }) {
                     columns, and publishing asks for at least one.
                   </p>
                 ) : (
-                  <MilestonesTab milestones={milestones} dated={dated} />
+                  <MilestonesTab milestones={milestones} dated={dated} currency="USD" />
                 ),
             },
             {

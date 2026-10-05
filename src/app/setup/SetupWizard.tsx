@@ -10,6 +10,7 @@ import { Tag } from 'primereact/tag';
 import { SelectButton } from 'primereact/selectbutton';
 import { ProgressBar } from 'primereact/progressbar';
 import AccentPicker from '@/components/AccentPicker';
+import DatabaseConnectionForm from '@/components/DatabaseConnectionForm';
 import DatabaseTestResult from '@/components/DatabaseTestResult';
 import HelpIcon from '@/components/HelpIcon';
 import JwtRules from '@/components/JwtRules';
@@ -17,25 +18,58 @@ import PasswordRules from '@/components/PasswordRules';
 import { passwordAcceptable } from '@/lib/password';
 import { JWT_DEFAULTS, JWT_KEYS, jwtProblem, newSigningKey } from '@/lib/jwt';
 import { PORTAL_NAME, apiFetch } from '@/lib/api';
-import { PROVIDERS, isMoveRunning, phaseLabel, testSetupDatabase, type DatabaseMove, type DatabaseTest } from '@/lib/database';
+import {
+  PROVIDERS,
+  blankFields,
+  connectPhaseLabel,
+  connectSetupDatabase,
+  fieldsFrom,
+  isMoveRunning,
+  phaseLabel,
+  sameFields,
+  testSetupConnection,
+  testSetupDatabase,
+  type DatabaseConnection,
+  type DatabaseConnectionFields,
+  type DatabaseMove,
+  type DatabaseTest,
+  type SetupConnecting,
+} from '@/lib/database';
 
 type DatabaseInfo = { provider: string; providerLabel: string; server: string; database: string };
-type Defaults = { values: Record<string, string | null>; locked: string[]; database: DatabaseInfo };
+type Defaults = {
+  values: Record<string, string | null>;
+  /** Keys whose value comes from the deployment's environment. Still editable: what the wizard saves wins. */
+  fromEnvironment: string[];
+  /** The database the API is on; null while it has none. */
+  database: DatabaseInfo | null;
+  /** The API has no database yet: the wizard starts by connecting one. */
+  needsDatabase?: boolean;
+  connection?: DatabaseConnection | null;
+};
 
-const STEPS = [
-  { label: 'Access' },
-  { label: 'Administrator' },
-  { label: 'Branding' },
-  { label: 'Email' },
-  { label: 'JWT' },
-  { label: 'Database' },
-  { label: 'Finish' },
-];
+type StepId = 'access' | 'connection' | 'admin' | 'branding' | 'email' | 'jwt' | 'database' | 'finish';
 
-/** The database step's index — the one step that can end with the API restarting. */
-const DATABASE = 5;
+const LABELS: Record<StepId, string> = {
+  access: 'Access',
+  connection: 'Connection',
+  admin: 'Administrator',
+  branding: 'Branding',
+  email: 'Email',
+  jwt: 'JWT',
+  database: 'Database',
+  finish: 'Finish',
+};
 
-const FINISH = STEPS.length - 1;
+/**
+ * The steps in order. An API with no database starts with Connection, and
+ * then has no Database step — the database was just chosen; an API that
+ * already has one ends with the offer to move it.
+ */
+const stepsFor = (connectFirst: boolean): StepId[] =>
+  connectFirst
+    ? ['access', 'connection', 'admin', 'branding', 'email', 'jwt', 'finish']
+    : ['access', 'admin', 'branding', 'email', 'jwt', 'database', 'finish'];
 
 export default function SetupWizard({
   initialToken,
@@ -44,11 +78,15 @@ export default function SetupWizard({
   initialToken: string;
   apiDown: boolean;
 }) {
-  const [step, setStep] = useState(0);
+  const [stepId, setStepId] = useState<StepId>('access');
+  // Whether this API started with no database: its wizard connects one first.
+  const [connectFirst, setConnectFirst] = useState(false);
+  const steps = stepsFor(connectFirst);
+  const index = steps.indexOf(stepId);
   const [token, setToken] = useState(initialToken);
   const [error, setError] = useState<string | null>(apiDown ? 'The API is unreachable right now.' : null);
   const [busy, setBusy] = useState(false);
-  const [locked, setLocked] = useState<string[]>([]);
+  const [fromEnv, setFromEnv] = useState<string[]>([]);
 
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
@@ -77,60 +115,169 @@ export default function SetupWizard({
   // run later, on a portal that holds only this account.
   const [dbCurrent, setDbCurrent] = useState<DatabaseInfo | null>(null);
   const [dbChoice, setDbChoice] = useState<'keep' | 'move'>('keep');
-  const [dbProvider, setDbProvider] = useState('sqlserver');
-  const [dbConnectionString, setDbConnectionString] = useState('');
+  const [dbFields, setDbFields] = useState<DatabaseConnectionFields>(() => blankFields('postgres'));
   const [dbTesting, setDbTesting] = useState(false);
-  const [dbTest, setDbTest] = useState<{ forString: string; result: DatabaseTest } | null>(null);
+  const [dbTest, setDbTest] = useState<{ forFields: DatabaseConnectionFields; result: DatabaseTest } | null>(null);
   // Once Finish answered "moving": the move being followed, then the restart.
   const [moving, setMoving] = useState<DatabaseMove | null>(null);
   const [restart, setRestart] = useState<'none' | 'waiting' | 'failed'>('none');
 
+  // The connection step, while the API has no database: the fields, their
+  // test, and the connect being followed until the real API answers.
+  const [connFields, setConnFields] = useState<DatabaseConnectionFields>(() => blankFields('sqlserver'));
+  const [connTesting, setConnTesting] = useState(false);
+  const [connTest, setConnTest] = useState<{ forFields: DatabaseConnectionFields; result: DatabaseTest } | null>(null);
+  const [connecting, setConnecting] = useState<SetupConnecting | null>(null);
+
   const autoVerified = useRef(false);
 
-  const isLocked = (key: string) => locked.includes(key);
+  const isFromEnv = (key: string) => fromEnv.includes(key);
+
+  /**
+   * The token check and the prefill in one call. Null when the API said
+   * no — the reason is on the page — or sent the operator elsewhere.
+   */
+  async function readDefaults(candidate: string, afterConnect = false): Promise<Defaults | null> {
+    const res = await apiFetch('/api/setup/defaults', {
+      headers: { 'X-Setup-Token': candidate },
+      cache: 'no-store',
+    });
+    if (res.status === 401) {
+      setError(
+        afterConnect
+          ? 'The database is connected, but the API came back with a new setup token — use the one in its log.'
+          : 'That setup token is not valid. The current one is in the API logs.',
+      );
+      return null;
+    }
+    if (res.status === 404) {
+      // Setup is complete on this database already — a portal's own data.
+      window.location.href = '/';
+      return null;
+    }
+    if (!res.ok) {
+      setError(`The API answered ${res.status}.`);
+      return null;
+    }
+    return (await res.json()) as Defaults;
+  }
 
   async function verifyToken(candidate: string) {
     setBusy(true);
     setError(null);
     try {
-      const res = await apiFetch('/api/setup/defaults', {
-        headers: { 'X-Setup-Token': candidate },
-      });
-      if (res.status === 401) {
-        setError('That setup token is not valid. The current one is in the API logs.');
+      const defaults = await readDefaults(candidate);
+      if (!defaults) return;
+      if (defaults.needsDatabase) {
+        setConnectFirst(true);
+        if (defaults.connection) setConnFields(fieldsFrom(defaults.connection));
+        setStepId('connection');
         return;
       }
-      if (res.status === 404) {
-        window.location.href = '/';
-        return;
-      }
-      if (!res.ok) {
-        setError(`The API answered ${res.status}.`);
-        return;
-      }
-      const defaults = (await res.json()) as Defaults;
-      setLocked(defaults.locked);
-      const v = defaults.values;
-      if (v['branding.portalName']) setPortalName(v['branding.portalName']);
-      if (v['branding.publicUrl']) setPublicUrl(v['branding.publicUrl']);
-      if (v['branding.apiUrl']) setApiUrl(v['branding.apiUrl']);
-      if (v['branding.accentColor']) setAccentColor(v['branding.accentColor']);
-      if (v['email.smtpHost']) setSmtpHost(v['email.smtpHost']);
-      if (v['email.smtpPort']) setSmtpPort(v['email.smtpPort']);
-      if (v['email.fromAddress']) setFromAddress(v['email.fromAddress']);
-      if (v[JWT_KEYS.issuer]) setJwtIssuer(v[JWT_KEYS.issuer]!);
-      if (v[JWT_KEYS.audience]) setJwtAudience(v[JWT_KEYS.audience]!);
-      if (v[JWT_KEYS.accessMinutes]) setJwtAccessMinutes(v[JWT_KEYS.accessMinutes]!);
-      if (v[JWT_KEYS.refreshDays]) setJwtRefreshDays(v[JWT_KEYS.refreshDays]!);
-      setDbCurrent(defaults.database);
-      setDbProvider(defaults.database.provider === 'postgres' ? 'sqlserver' : 'postgres');
-      setStep(1);
+      applyDefaults(defaults);
+      setStepId('admin');
     } catch {
       setError('Could not reach the API.');
     } finally {
       setBusy(false);
     }
   }
+
+  /** The prefill, once the API is on a database. */
+  function applyDefaults(defaults: Defaults) {
+    setFromEnv(defaults.fromEnvironment ?? []);
+    const v = defaults.values;
+    if (v['branding.portalName']) setPortalName(v['branding.portalName']);
+    if (v['branding.publicUrl']) setPublicUrl(v['branding.publicUrl']);
+    if (v['branding.apiUrl']) setApiUrl(v['branding.apiUrl']);
+    if (v['branding.accentColor']) setAccentColor(v['branding.accentColor']);
+    if (v['email.smtpHost']) setSmtpHost(v['email.smtpHost']);
+    if (v['email.smtpPort']) setSmtpPort(v['email.smtpPort']);
+    if (v['email.fromAddress']) setFromAddress(v['email.fromAddress']);
+    if (v[JWT_KEYS.issuer]) setJwtIssuer(v[JWT_KEYS.issuer]!);
+    if (v[JWT_KEYS.audience]) setJwtAudience(v[JWT_KEYS.audience]!);
+    if (v[JWT_KEYS.accessMinutes]) setJwtAccessMinutes(v[JWT_KEYS.accessMinutes]!);
+    if (v[JWT_KEYS.refreshDays]) setJwtRefreshDays(v[JWT_KEYS.refreshDays]!);
+    setDbCurrent(defaults.database);
+    if (defaults.database)
+      setDbFields(blankFields(defaults.database.provider === 'postgres' ? 'sqlserver' : 'postgres'));
+  }
+
+  const connTested =
+    connTest !== null && sameFields(connTest.forFields, connFields) && connTest.result.action === 'connect';
+
+  async function runConnTest() {
+    setConnTesting(true);
+    setError(null);
+    setConnTest(null);
+    try {
+      const result = await testSetupConnection(token, connFields);
+      setConnTest({ forFields: connFields, result });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not reach the API.');
+    } finally {
+      setConnTesting(false);
+    }
+  }
+
+  async function connect() {
+    setError(null);
+    try {
+      setConnecting(await connectSetupDatabase(token, connFields));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not reach the API.');
+    }
+  }
+
+  // The connect runs in the API's background: the tables are made, the
+  // connection saved, and the small connect-only API gives way to the real
+  // one on the new database. Its status is followed through all of that —
+  // a failed fetch is the moment between the two — until it no longer asks
+  // for a database; then the prefill is read again, with the same token.
+  useEffect(() => {
+    if (!connecting || connecting.phase === 'failed') return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const tick = async () => {
+      if (cancelled) return;
+      try {
+        const res = await apiFetch('/api/setup/status', { cache: 'no-store' });
+        if (res.ok) {
+          const status = (await res.json()) as { completed: boolean; needsDatabase?: boolean; connecting?: SetupConnecting | null };
+          if (cancelled) return;
+          if (status.completed) {
+            window.location.href = '/';
+            return;
+          }
+          if (!status.needsDatabase) {
+            const defaults = await readDefaults(token, true);
+            if (cancelled) return;
+            if (defaults) {
+              applyDefaults(defaults);
+              setConnecting(null);
+              setStepId('admin');
+            }
+            return;
+          }
+          if (status.connecting) {
+            setConnecting(status.connecting);
+            if (status.connecting.phase === 'failed') {
+              setError(status.connecting.error ?? 'Connecting failed.');
+              return;
+            }
+          }
+        }
+      } catch {
+        /* between the connect-only API and the real one */
+      }
+      timer = window.setTimeout(() => void tick(), 1500);
+    };
+    timer = window.setTimeout(() => void tick(), 1000);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [connecting !== null && connecting.phase !== 'failed']); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (initialToken && !autoVerified.current) {
@@ -142,33 +289,33 @@ export default function SetupWizard({
 
   function next() {
     setError(null);
-    if (step === 1) {
+    if (stepId === 'admin') {
       if (!displayName.trim()) return setError('A display name is required.');
       if (!email.includes('@')) return setError('A valid email is required.');
       if (!passwordAcceptable(password)) return setError('The password needs everything ticked below it.');
       if (password !== confirm) return setError('The passwords do not match.');
     }
-    if (step === 2 && !portalName.trim()) return setError('The portal needs a name.');
-    if (step === 4) {
+    if (stepId === 'branding' && !portalName.trim()) return setError('The portal needs a name.');
+    if (stepId === 'jwt') {
       for (const [key, value] of Object.entries(jwtValues())) {
-        const problem = isLocked(key) ? null : jwtProblem(key, value);
+        const problem = jwtProblem(key, value);
         if (problem) return setError(problem);
       }
     }
-    if (step === DATABASE && dbChoice === 'move' && !dbTested)
-      return setError('Test the connection first — a move starts only from a passing test of this exact string.');
-    setStep(step + 1);
+    if (stepId === 'database' && dbChoice === 'move' && !dbTested)
+      return setError('Test the connection first — a move starts only from a passing test of exactly these fields.');
+    setStepId(steps[index + 1]);
   }
 
-  const dbTested = dbTest !== null && dbTest.forString === dbConnectionString && dbTest.result.problem === null;
+  const dbTested = dbTest !== null && sameFields(dbTest.forFields, dbFields) && dbTest.result.problem === null;
 
   async function runDbTest() {
     setDbTesting(true);
     setError(null);
     setDbTest(null);
     try {
-      const result = await testSetupDatabase(token, { provider: dbProvider, connectionString: dbConnectionString });
-      setDbTest({ forString: dbConnectionString, result });
+      const result = await testSetupDatabase(token, dbFields);
+      setDbTest({ forFields: dbFields, result });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not reach the API.');
     } finally {
@@ -257,7 +404,7 @@ export default function SetupWizard({
             'email.fromAddress': fromAddress,
             ...jwtValues(),
           },
-          database: dbChoice === 'move' ? { provider: dbProvider, connectionString: dbConnectionString } : null,
+          database: dbChoice === 'move' ? dbFields : null,
         }),
       });
       if (res.status === 204) {
@@ -269,7 +416,7 @@ export default function SetupWizard({
         const finished = (await res.json()) as { moving: boolean; error: string | null };
         if (finished.moving) {
           setMoving({
-            phase: 'checking', target: dbProvider, targetServer: null, targetDatabase: null, currentTable: null,
+            phase: 'checking', target: dbFields.provider, targetServer: null, targetDatabase: null, currentTable: null,
             tablesDone: 0, tablesTotal: 0, rowsCopied: 0, error: null, startedAtUtc: null, finishedAtUtc: null,
             startedBy: email, restartPending: false,
           });
@@ -304,7 +451,7 @@ export default function SetupWizard({
         </p>
 
         <div className="mt-8">
-          <Steps model={STEPS} activeIndex={step} readOnly />
+          <Steps model={steps.map((s) => ({ label: LABELS[s] }))} activeIndex={index} readOnly />
         </div>
 
         {error && (
@@ -314,7 +461,7 @@ export default function SetupWizard({
         )}
 
         <div className="mt-8 flex flex-col gap-4">
-          {step === 0 && (
+          {stepId === 'access' && (
             <>
               <p className="text-[var(--text-color-secondary)]">
                 Paste the one-time setup token from the API logs (the line that
@@ -332,7 +479,54 @@ export default function SetupWizard({
             </>
           )}
 
-          {step === 1 && (
+          {stepId === 'connection' && (
+            <>
+              <div>
+                <h2 className="m-0 flex items-center gap-1 text-lg font-semibold">
+                  Connect the database
+                  <HelpIcon topic="setup.connection" label="Connect the database" />
+                </h2>
+                <p className="m-0 mt-1 text-[var(--text-color-secondary)]">
+                  The API has no database yet. Say where it is and test it; connecting creates the portal&apos;s tables
+                  there and keeps the connection, encrypted, beside the API&apos;s keys.
+                </p>
+              </div>
+              <DatabaseConnectionForm
+                value={connFields}
+                onChange={setConnFields}
+                disabled={connecting !== null && connecting.phase !== 'failed'}
+                idPrefix="setup-connect"
+              />
+              {connTest && <DatabaseTestResult provider={connTest.forFields.provider} result={connTest.result} />}
+              {connecting && connecting.phase !== 'failed' ? (
+                <p className="m-0 text-sm font-medium">
+                  <i className="pi pi-spin pi-spinner mr-2" aria-hidden />
+                  {connectPhaseLabel(connecting.phase)} — {connecting.server} / {connecting.database}. This page follows.
+                </p>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    label="Test connection"
+                    icon="pi pi-bolt"
+                    outlined
+                    loading={connTesting}
+                    disabled={!connFields.server.trim() || !connFields.database.trim()}
+                    onClick={() => void runConnTest()}
+                  />
+                  <Button
+                    label="Connect"
+                    icon="pi pi-link"
+                    disabled={!connTested}
+                    title={connTested ? undefined : 'Test the connection first; connecting starts only from a passing test of exactly these fields.'}
+                    onClick={() => void connect()}
+                  />
+                  <HelpIcon topic="admin.database.test" label="What the test checks" />
+                </div>
+              )}
+            </>
+          )}
+
+          {stepId === 'admin' && (
             <>
               <div className={field}>
                 <label className={label} htmlFor="displayName">Display name</label>
@@ -376,32 +570,32 @@ export default function SetupWizard({
             </>
           )}
 
-          {step === 2 && (
+          {stepId === 'branding' && (
             <>
               <div className={field}>
                 <label className={label} htmlFor="portalName">Portal name</label>
-                <InputText id="portalName" value={portalName} onChange={(e) => setPortalName(e.target.value)} autoFocus disabled={isLocked('branding.portalName')} />
+                <InputText id="portalName" value={portalName} onChange={(e) => setPortalName(e.target.value)} autoFocus />
               </div>
               <div className={field}>
                 <label className={label} htmlFor="publicUrl">
                   Web URL
                   <HelpIcon topic="settings.branding.publicUrl" label="Web URL" />{' '}
-                  {isLocked('branding.publicUrl') && <Tag value="set by environment" severity="info" className="ml-2" />}
+                  {isFromEnv('branding.publicUrl') && <Tag value="from environment" severity="info" className="ml-2" title="The deployment sets this. Change it here and your value wins." />}
                 </label>
-                <InputText id="publicUrl" value={publicUrl} onChange={(e) => setPublicUrl(e.target.value)} disabled={isLocked('branding.publicUrl')} />
+                <InputText id="publicUrl" value={publicUrl} onChange={(e) => setPublicUrl(e.target.value)} />
               </div>
               <div className={field}>
                 <label className={label} htmlFor="apiUrl">
                   API URL
                   <HelpIcon topic="settings.branding.apiUrl" label="API URL" />{' '}
-                  {isLocked('branding.apiUrl') && <Tag value="set by environment" severity="info" className="ml-2" />}
+                  {isFromEnv('branding.apiUrl') && <Tag value="from environment" severity="info" className="ml-2" title="The deployment sets this. Change it here and your value wins." />}
                 </label>
                 <InputText
                   id="apiUrl"
                   value={apiUrl}
                   onChange={(e) => setApiUrl(e.target.value)}
                   placeholder="blank — the pages' own address"
-                  disabled={isLocked('branding.apiUrl')}
+                 
                 />
               </div>
               <div className={field}>
@@ -411,7 +605,7 @@ export default function SetupWizard({
             </>
           )}
 
-          {step === 3 && (
+          {stepId === 'email' && (
             <>
               <p className="text-[var(--text-color-secondary)]">
                 Where outbound email goes. The compose stack points this at
@@ -428,16 +622,16 @@ export default function SetupWizard({
                     <label className={label} htmlFor={cfg.id}>
                       {cfg.text}
                       <HelpIcon topic={`settings.${key}`} label={cfg.text} />{' '}
-                      {isLocked(key) && <Tag value="set by environment" severity="info" className="ml-2" />}
+                      {isFromEnv(key) && <Tag value="from environment" severity="info" className="ml-2" title="The deployment sets this. Change it here and your value wins." />}
                     </label>
-                    <InputText id={cfg.id} value={cfg.value} onChange={(e) => cfg.set(e.target.value)} disabled={isLocked(key)} />
+                    <InputText id={cfg.id} value={cfg.value} onChange={(e) => cfg.set(e.target.value)} />
                   </div>
                 );
               })}
             </>
           )}
 
-          {step === 4 && (
+          {stepId === 'jwt' && (
             <>
               <div>
                 <h2 className="m-0 text-lg font-semibold">JWT (token signing &amp; lifetimes)</h2>
@@ -456,9 +650,9 @@ export default function SetupWizard({
                     <label className={label} htmlFor={id}>
                       {text}
                       <HelpIcon topic={`settings.${key}`} label={text} />{' '}
-                      {isLocked(key) && <Tag value="set by environment" severity="info" className="ml-2" />}
+                      {isFromEnv(key) && <Tag value="from environment" severity="info" className="ml-2" title="The deployment sets this. Change it here and your value wins." />}
                     </label>
-                    <InputText id={id} value={value} onChange={(e) => set(e.target.value)} disabled={isLocked(key)} />
+                    <InputText id={id} value={value} onChange={(e) => set(e.target.value)} />
                   </div>
                 ))}
               </div>
@@ -466,7 +660,7 @@ export default function SetupWizard({
                 <label className={label} htmlFor="jwtSigningKey">
                   Signing key (leave blank to keep current key)
                   <HelpIcon topic={`settings.${JWT_KEYS.signingKey}`} label="Signing key" />{' '}
-                  {isLocked(JWT_KEYS.signingKey) && <Tag value="set by environment" severity="info" className="ml-2" />}
+                  {isFromEnv(JWT_KEYS.signingKey) && <Tag value="from environment" severity="info" className="ml-2" title="The deployment sets this. Change it here and your value wins." />}
                 </label>
                 <div className="flex items-center gap-2">
                   <Password
@@ -476,7 +670,6 @@ export default function SetupWizard({
                     placeholder="Current key"
                     feedback={false}
                     toggleMask
-                    disabled={isLocked(JWT_KEYS.signingKey)}
                     className="min-w-0 flex-1"
                     inputClassName="w-full"
                   />
@@ -484,7 +677,6 @@ export default function SetupWizard({
                     label="Generate"
                     icon="pi pi-key"
                     outlined
-                    disabled={isLocked(JWT_KEYS.signingKey)}
                     onClick={() => setJwtSigningKey(newSigningKey())}
                   />
                 </div>
@@ -500,9 +692,9 @@ export default function SetupWizard({
                     <label className={label} htmlFor={id}>
                       {text}
                       <HelpIcon topic={`settings.${key}`} label={text} />{' '}
-                      {isLocked(key) && <Tag value="set by environment" severity="info" className="ml-2" />}
+                      {isFromEnv(key) && <Tag value="from environment" severity="info" className="ml-2" title="The deployment sets this. Change it here and your value wins." />}
                     </label>
-                    <InputText id={id} value={value} inputMode="numeric" onChange={(e) => set(e.target.value)} disabled={isLocked(key)} />
+                    <InputText id={id} value={value} inputMode="numeric" onChange={(e) => set(e.target.value)} />
                   </div>
                 ))}
               </div>
@@ -510,7 +702,7 @@ export default function SetupWizard({
             </>
           )}
 
-          {step === DATABASE && !moving && (
+          {stepId === 'database' && !moving && (
             <>
               <div>
                 <h2 className="m-0 flex items-center gap-1 text-lg font-semibold">
@@ -524,14 +716,14 @@ export default function SetupWizard({
                       {' '}at <code>{dbCurrent.server}</code> / <code>{dbCurrent.database}</code>
                     </>
                   )}
-                  . Keep it, or move to the other database now, before anybody else has used the portal.
+                  . Keep it, or move to another database now, before anybody else has used the portal.
                 </p>
               </div>
               <SelectButton
                 value={dbChoice}
                 options={[
                   { label: `Keep ${dbCurrent?.providerLabel ?? 'this database'}`, value: 'keep' },
-                  { label: dbCurrent?.provider === 'postgres' ? 'Move to SQL Server' : 'Move to PostgreSQL', value: 'move' },
+                  { label: 'Move to another database', value: 'move' },
                 ]}
                 onChange={(e) => {
                   if (e.value) setDbChoice(e.value);
@@ -540,50 +732,18 @@ export default function SetupWizard({
               />
               {dbChoice === 'move' && (
                 <>
-                  <div className={field}>
-                    <label className={label}>Database</label>
-                    <SelectButton
-                      value={dbProvider}
-                      options={PROVIDERS}
-                      onChange={(e) => {
-                        if (e.value) {
-                          setDbProvider(e.value);
-                          setDbTest(null);
-                        }
-                      }}
-                      allowEmpty={false}
-                    />
-                  </div>
-                  <div className={field}>
-                    <label className={label} htmlFor="dbConnectionString">
-                      Connection string
-                      <HelpIcon topic="admin.database.test" label="What a connection string needs" />
-                    </label>
-                    <Password
-                      inputId="dbConnectionString"
-                      value={dbConnectionString}
-                      onChange={(e) => setDbConnectionString(e.target.value)}
-                      feedback={false}
-                      toggleMask
-                      className="w-full"
-                      inputClassName="w-full font-mono text-xs"
-                      placeholder={
-                        dbProvider === 'sqlserver'
-                          ? 'Server=host,1433;Database=winnersportal;User Id=…;Password=…;TrustServerCertificate=True'
-                          : 'Host=host;Port=5432;Database=winnersportal;Username=…;Password=…'
-                      }
-                    />
-                  </div>
-                  {dbTest && <DatabaseTestResult provider={dbProvider} result={dbTest.result} />}
-                  <div>
+                  <DatabaseConnectionForm value={dbFields} onChange={setDbFields} idPrefix="setup-move" />
+                  {dbTest && <DatabaseTestResult provider={dbTest.forFields.provider} result={dbTest.result} />}
+                  <div className="flex items-center gap-2">
                     <Button
-                      label="Test"
+                      label="Test connection"
                       icon="pi pi-bolt"
                       outlined
                       loading={dbTesting}
-                      disabled={dbConnectionString.trim().length === 0}
+                      disabled={!dbFields.server.trim() || !dbFields.database.trim()}
                       onClick={() => void runDbTest()}
                     />
+                    <HelpIcon topic="admin.database.test" label="What the test checks" />
                   </div>
                 </>
               )}
@@ -624,12 +784,14 @@ export default function SetupWizard({
             </div>
           )}
 
-          {step === FINISH && !moving && (
+          {stepId === 'finish' && !moving && (
             <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2">
               <dt className="font-medium">Database</dt>
               <dd>
-                {dbChoice === 'move'
-                  ? `move to ${PROVIDERS.find((p) => p.value === dbProvider)?.label ?? dbProvider}, then restart`
+                {connectFirst
+                  ? `${PROVIDERS.find((p) => p.value === connFields.provider)?.label ?? connFields.provider} at ${connFields.server} / ${connFields.database}, connected`
+                  : dbChoice === 'move'
+                  ? `move to ${PROVIDERS.find((p) => p.value === dbFields.provider)?.label ?? dbFields.provider} at ${dbFields.server} / ${dbFields.database}, then restart`
                   : `keep ${dbCurrent?.providerLabel ?? 'the current database'}`}
               </dd>
               <dt className="font-medium">Administrator</dt>
@@ -663,12 +825,16 @@ export default function SetupWizard({
               label="Back"
               icon="pi pi-arrow-left"
               outlined
-              disabled={step === 0 || step === 1 || busy}
-              onClick={() => setStep(step - 1)}
+              // Nothing before the administrator goes back: the token is
+              // checked and a connected database stays connected.
+              disabled={stepId === 'access' || stepId === 'connection' || stepId === 'admin' || busy}
+              onClick={() => setStepId(steps[index - 1])}
             />
-            {step === 0 && <Button label="Verify token" icon="pi pi-arrow-right" iconPos="right" loading={busy} onClick={() => void verifyToken(token)} />}
-            {step > 0 && step < FINISH && <Button label="Next" icon="pi pi-arrow-right" iconPos="right" onClick={next} />}
-            {step === FINISH && (
+            {stepId === 'access' && <Button label="Verify token" icon="pi pi-arrow-right" iconPos="right" loading={busy} onClick={() => void verifyToken(token)} />}
+            {stepId !== 'access' && stepId !== 'connection' && stepId !== 'finish' && (
+              <Button label="Next" icon="pi pi-arrow-right" iconPos="right" onClick={next} />
+            )}
+            {stepId === 'finish' && (
               <Button
                 label={dbChoice === 'move' ? 'Finish setup and move' : 'Finish setup'}
                 icon="pi pi-check"

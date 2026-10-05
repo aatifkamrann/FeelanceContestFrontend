@@ -1,4 +1,4 @@
-import { postJson, type OpportunityDelivery, type OpportunityFitResult } from './opportunities';
+import { postJson, type OpportunityDelivery, type OpportunityFitResult, type OpportunityKind } from './opportunities';
 import { apiFetch } from '@/lib/api';
 
 /**
@@ -16,7 +16,8 @@ import { apiFetch } from '@/lib/api';
 export type ApplicationStatus = 'under_review' | 'selected' | 'not_selected' | 'removed' | 'withdrawn';
 
 /** How a selection ended up, as the opportunity went: still running, in review, won, lost, or cancelled. */
-export type ApplicationOutcome = 'open' | 'reviewing' | 'won' | 'lost' | 'cancelled';
+/** hired: paid by milestone, the selection was the hire itself. */
+export type ApplicationOutcome = 'open' | 'reviewing' | 'won' | 'hired' | 'lost' | 'cancelled';
 
 /** How much of their week the applicant gives this opportunity — the application's own answer, not the profile's. */
 export type Commitment = 'full' | 'partial' | 'limited';
@@ -130,6 +131,8 @@ export type ApplyContext = {
     status: string;
     delivery: OpportunityDelivery;
     needsGithubUsername: boolean;
+    /** Competitive, or one hire paid by milestone — the pledges are worded by it. */
+    kind: OpportunityKind;
     category: string | null;
     categoryLabel: string | null;
     skills: string[];

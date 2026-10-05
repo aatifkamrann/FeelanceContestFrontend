@@ -76,6 +76,8 @@ export type FormDraft<T> = {
   output: T;
   provider: string | null;
   completedAtUtc: string | null;
+  /** True when the API answered from its hour-long memory of this same form, so no call was spent. */
+  cached?: boolean;
 };
 
 /**
@@ -181,7 +183,8 @@ export function SuggestButton({
 
 /**
  * Every AI draft says so, and says who wrote it — provenance is part of the
- * feature. The API names the portal's own AI ("YupAI", Ai/AiBrand.cs), never
+ * feature. The API names it by the portal's own name (Branding → Portal name,
+ * Ai/AiBrand.cs), never
  * the vendor behind it; "local" is work that never left the server.
  */
 export function AiProvenance({

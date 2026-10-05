@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { verifyPath } from '@/lib/identity';
 import { useRouter } from 'next/navigation';
@@ -31,12 +31,14 @@ import HelpIcon from '@/components/HelpIcon';
 import SuggestInput from '@/components/SuggestInput';
 import {
   aiStatusQuery,
+  buildHostQuery,
   categoriesQuery,
   ApiError,
   postJson,
   putJson,
   usesRepo,
   type OpportunityDelivery,
+  type OpportunityKind,
 } from '@/lib/opportunities';
 import { brandingQuery } from '@/lib/api';
 import { skillsForCategories, suggestSkills } from '@/lib/categorise';
@@ -50,6 +52,8 @@ export type EditorMilestone = {
   dueUtc?: string | null;
   /** This milestone's share of the work in percent; blank on a checklist that states none. */
   weightPercent?: number | null;
+  /** What it pays, on an opportunity paid by milestone; blank while drafting. */
+  amount?: number | null;
 };
 /** One row of the technical requirements table: the constraint, and what it asks for. */
 export type EditorRequirement = { title: string; detail: string };
@@ -60,6 +64,8 @@ export type EditorValue = {
   title: string;
   briefMarkdown: string;
   awardAmount: number | null;
+  /** Competitive, or one hired freelancer paid milestone by milestone. Frozen at publish. */
+  kind: OpportunityKind;
   /** How work is handed in. No default: it is a term of the deal, and the client chooses it. */
   delivery: OpportunityDelivery | null;
   /** Entries must run with Docker Compose — only with a repository delivery; the tick clears when that goes. */
@@ -110,6 +116,47 @@ const clampMerit = (n: number | null): number | null =>
 
 /** A row said twice — the same outline the profile form draws. */
 const REPEATED = 'border-red-500/60 bg-red-500/5';
+
+/**
+ * The two ways an opportunity pays. Competitive first: it is what the portal
+ * was built for, and what every opportunity before the choice was.
+ */
+const KIND_OPTIONS: { value: OpportunityKind; icon: string; title: string; detail: string }[] = [
+  {
+    value: 'competitive',
+    icon: 'pi-trophy',
+    title: 'Competitive',
+    detail: 'The applicants you select all build it. You review every entry after the deadline and pay the one winner the award.',
+  },
+  {
+    value: 'milestones',
+    icon: 'pi-list-check',
+    title: 'Paid by milestone',
+    detail: 'You hire one applicant. Each milestone is handed in, approved and paid its amount before the next one opens.',
+  },
+];
+
+/** Whole dollars split over n milestones, the remainder cent-free and on the first. */
+const evenAmounts = (total: number, n: number): number[] => {
+  const base = Math.floor(total / n);
+  return Array.from({ length: n }, (_, i) => base + (i === 0 ? total - base * n : 0));
+};
+
+/**
+ * A drafted split made to add up to the total exactly: the model's amounts
+ * scaled where they miss it, whole dollars, the rounding on the last; an
+ * even split where the model gave none. Nothing without a total to split.
+ */
+const fitAmounts = (drafted: (number | null | undefined)[], total: number | null): (number | null)[] => {
+  const n = drafted.length;
+  if (!total || total <= 0 || n === 0) return drafted.map(() => null);
+  if (drafted.some((a) => a == null || a <= 0)) return evenAmounts(total, n);
+  const sum = drafted.reduce<number>((s, a) => s + (a ?? 0), 0);
+  if (sum === total) return drafted.map((a) => a!);
+  const scaled = drafted.map((a) => Math.max(1, Math.round(((a ?? 0) * total) / sum)));
+  scaled[n - 1] += total - scaled.reduce((s, a) => s + a, 0);
+  return scaled;
+};
 
 /**
  * The three ways work arrives, in the words a client chooses between. Order
@@ -167,12 +214,13 @@ const EMPTY: EditorValue = {
   title: '',
   briefMarkdown: '',
   awardAmount: null,
+  kind: 'competitive',
   delivery: null,
   requiresCompose: false,
   startsAtUtc: null,
   deadlineUtc: null,
   entryCloseUtc: null,
-  milestones: [{ title: '', description: '', dueUtc: null, weightPercent: null }],
+  milestones: [{ title: '', description: '', dueUtc: null, weightPercent: null, amount: null }],
   metaTitle: '',
   metaDescription: '',
   category: null,
@@ -286,13 +334,16 @@ const stepDue = (beginsAt: number, end: number, i: number, n: number, byTheDay: 
  * anything the client chose, and a date nobody chose is worse than a blank.
  */
 const scheduleDraft = (
-  drafted: { title: string; description: string }[],
+  drafted: { title: string; description: string; amount?: number | null }[],
   beginsAt: number,
   deadlineUtc: string | null,
+  paidBy: { total: number | null } | null = null,
 ): EditorMilestone[] => {
   const n = drafted.length;
   if (n === 0) return [];
   const shares = evenShares(n);
+  // Paid by milestone the amounts are the shares, and they are the total's.
+  const amounts = paidBy ? fitAmounts(drafted.map((m) => m.amount), paidBy.total) : null;
   const end = deadlineUtc ? Date.parse(deadlineUtc) : null;
   const dated = end !== null && end > beginsAt;
   const byTheDay = dated && end! - beginsAt >= n * DAY_MS;
@@ -300,7 +351,8 @@ const scheduleDraft = (
     title: m.title,
     description: m.description,
     dueUtc: dated ? stepDue(beginsAt, end!, i, n, byTheDay) : null,
-    weightPercent: shares[i],
+    weightPercent: amounts ? null : shares[i],
+    amount: amounts ? amounts[i] : null,
   }));
 };
 
@@ -397,6 +449,10 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
   const { data: taxonomy } = useQuery(categoriesQuery);
   const { data: pools } = useQuery(suggestionsQuery);
   const { data: branding } = useQuery(brandingQuery);
+  // Docker Compose is offered only while builds are on — a build host
+  // switched on and passing its test. Unknown counts as off.
+  const { data: buildHost } = useQuery(buildHostQuery);
+  const composeOffered = buildHost?.ready === true;
   const defaultDays = branding?.opportunityDefaultDurationDays ?? 14;
   const categories = useMemo(() => taxonomy?.categories ?? [], [taxonomy]);
   const categoryDef = categories.find((c) => c.key === value.category) ?? null;
@@ -447,6 +503,15 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
   const sharesTotal = titledMilestones.reduce((sum, m) => sum + (m.weightPercent ?? 0), 0);
   const sharesWhole = sharesStated === titledMilestones.length && sharesTotal === 100;
 
+  // Paid by milestone: the amounts, read as publish reads them — every
+  // titled milestone paying something, together exactly the total.
+  const byMilestone = value.kind === 'milestones';
+  const amountsStated = titledMilestones.filter((m) => (m.amount ?? 0) > 0).length;
+  const allocated = titledMilestones.reduce((sum, m) => sum + (m.amount ?? 0), 0);
+  const total = value.awardAmount ?? 0;
+  const amountsWhole = amountsStated === titledMilestones.length && allocated === total && total > 0;
+  const usd = (n: number) => `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+
   const rubricTotal = value.criteria.reduce((sum, c) => sum + (c.points ?? 0), 0);
 
   // The draft replaces the list, so hand-written milestones get a warning
@@ -490,6 +555,12 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
 
   const set = <K extends keyof EditorValue>(key: K, v: EditorValue[K]) =>
     setValue((prev) => ({ ...prev, [key]: v }));
+
+  // A draft saved with the requirement while builds were on drops it once
+  // they are off: the option is not shown, and the API would refuse it.
+  useEffect(() => {
+    if (buildHost && !buildHost.ready && value.requiresCompose) set('requiresCompose', false);
+  }, [buildHost, value.requiresCompose]);
 
   const setMilestone = (i: number, patch: Partial<EditorMilestone>) =>
     setValue((prev) => ({
@@ -570,6 +641,33 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
   const clearShares = () =>
     set('milestones', value.milestones.map((m) => ({ ...m, weightPercent: null })));
 
+  // The total in whole dollars over the titled milestones.
+  const splitAmountsEvenly = () =>
+    setValue((prev) => {
+      const titled = prev.milestones.filter((m) => m.title.trim() !== '');
+      const whole = Math.floor(prev.awardAmount ?? 0);
+      if (titled.length === 0 || whole <= 0) return prev;
+      const parts = evenAmounts(whole, titled.length);
+      let k = 0;
+      return {
+        ...prev,
+        milestones: prev.milestones.map((m) =>
+          m.title.trim() === '' ? { ...m, amount: null } : { ...m, amount: parts[k++] },
+        ),
+      };
+    });
+
+  // Changing how it pays swaps shares for amounts: kept on the rows, but
+  // the one the choice does not read is cleared so nothing stale is saved.
+  const chooseKind = (kind: OpportunityKind) =>
+    setValue((prev) => ({
+      ...prev,
+      kind,
+      milestones: prev.milestones.map((m) =>
+        kind === 'milestones' ? { ...m, weightPercent: null } : { ...m, amount: null },
+      ),
+    }));
+
   // The opportunity duration, as the publish gate counts it: from the start
   // day where that is still ahead, from now where it is today or blank, to
   // the deadline. Null while the deadline is blank — the policy's default
@@ -580,8 +678,8 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
 
   // The drafting help draws its dates and shares from that same window, so a
   // deadline moved after a draft was read moves the list it is offering too.
-  const planDraft = (drafted: { title: string; description: string }[]) =>
-    scheduleDraft(drafted, begins, value.deadlineUtc);
+  const planDraft = (drafted: { title: string; description: string; amount?: number | null }[]) =>
+    scheduleDraft(drafted, begins, value.deadlineUtc, byMilestone ? { total: value.awardAmount } : null);
 
   // The form as every drafting tool reads it — the same snapshot to each,
   // with each reading the sections above the one it fills.
@@ -595,6 +693,7 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
     title: value.title,
     briefMarkdown: value.briefMarkdown,
     awardAmount: value.awardAmount ?? 0,
+    kind: value.kind,
     delivery: value.delivery,
     requiresCompose: value.requiresCompose,
     startsAtUtc: value.startsAtUtc,
@@ -606,7 +705,8 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
         title: m.title,
         description: m.description || null,
         dueUtc: m.dueUtc ?? null,
-        weightPercent: m.weightPercent ?? null,
+        weightPercent: byMilestone ? null : m.weightPercent ?? null,
+        amount: byMilestone ? m.amount ?? null : null,
       })),
     metaTitle: value.metaTitle || null,
     metaDescription: value.metaDescription || null,
@@ -1122,6 +1222,37 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
               </div>
             </Panel>
 
+            {/* How it pays — the first term of the deal, and the one the
+                award, the milestones and the review box below all read. */}
+            <Panel
+              title="How it pays"
+              help={<HelpIcon topic="opportunity.kind" label="How the opportunity pays" />}
+              intro="Frozen at publish with the rest of the terms — freelancers decide whether to apply on it."
+            >
+              <div className="grid gap-3 sm:grid-cols-2">
+                {KIND_OPTIONS.map((o) => {
+                  const chosen = value.kind === o.value;
+                  return (
+                    <button
+                      type="button"
+                      key={o.value}
+                      aria-pressed={chosen}
+                      onClick={() => chooseKind(o.value)}
+                      className={`rounded-xl border p-4 text-left transition-colors ${
+                        chosen
+                          ? 'border-[var(--primary-color)] bg-[color-mix(in_srgb,var(--primary-color)_8%,transparent)]'
+                          : 'border-[var(--surface-border)] bg-[var(--surface-card)] hover:border-[var(--primary-color)]'
+                      }`}
+                    >
+                      <i className={`pi ${o.icon} text-xl text-[var(--primary-color)]`} aria-hidden />
+                      <p className="mt-2 font-medium">{o.title}</p>
+                      <p className="mt-1 text-sm text-[var(--text-color-secondary)]">{o.detail}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </Panel>
+
             {/* How the work arrives — a term of the deal. It sits above the
                 milestones because the checklist drafted below reads it: a
                 milestone verifiable inside a repository is not one verifiable
@@ -1160,23 +1291,26 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
 
               {/* A running program has a compose file, and the build host proves
                   each claim builds from it. The tick follows the delivery: it is
-                  greyed until a repository is part of the deal. */}
-              <div className="mt-4 flex items-start gap-2">
-                <Checkbox
-                  inputId="requires-compose"
-                  checked={value.requiresCompose}
-                  disabled={!value.delivery || !usesRepo(value.delivery)}
-                  onChange={(e) => set('requiresCompose', e.checked ?? false)}
-                />
-                <label htmlFor="requires-compose" className="text-sm">
-                  <span className="font-medium">Entries must run with Docker Compose</span>
-                  <HelpIcon topic="opportunity.requiresCompose" label="Entries must run with Docker Compose" />
-                  <span className="block text-[var(--text-color-secondary)]">
-                    Every milestone claim is built from the repository&apos;s compose file, and the board shows
-                    whether it built. For work you should be able to run — not a library, a tool or a design.
-                  </span>
-                </label>
-              </div>
+                  greyed until a repository is part of the deal — and it is not
+                  here at all while builds are off. */}
+              {composeOffered && (
+                <div className="mt-4 flex items-start gap-2">
+                  <Checkbox
+                    inputId="requires-compose"
+                    checked={value.requiresCompose}
+                    disabled={!value.delivery || !usesRepo(value.delivery)}
+                    onChange={(e) => set('requiresCompose', e.checked ?? false)}
+                  />
+                  <label htmlFor="requires-compose" className="text-sm">
+                    <span className="font-medium">Entries must run with Docker Compose</span>
+                    <HelpIcon topic="opportunity.requiresCompose" label="Entries must run with Docker Compose" />
+                    <span className="block text-[var(--text-color-secondary)]">
+                      Every milestone claim is built from the repository&apos;s compose file, and the board shows
+                      whether it built. For work you should be able to run — not a library, a tool or a design.
+                    </span>
+                  </label>
+                </div>
+              )}
 
               {/* Attachments belong to a saved draft — files need an opportunity to attach to. */}
               {value.id ? (
@@ -1191,14 +1325,18 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
 
             <Panel
               title="Award and dates"
-              intro="The fixed award and the clock. Blank dates take the portal's defaults at publish."
+              intro={
+                byMilestone
+                  ? "The job's total — what the milestones add up to — and the clock. Blank dates take the portal's defaults at publish."
+                  : "The fixed award and the clock. Blank dates take the portal's defaults at publish."
+              }
             >
               {/* Two by two: the award and the day it starts, then the two dates
                   that close it. */}
               <div className="grid gap-6 sm:grid-cols-2">
                 <div>
                   <label htmlFor="c-award" className="font-medium">
-                    Award (USD)
+                    {byMilestone ? 'Total (USD)' : 'Award (USD)'}
                     <HelpIcon topic="opportunity.awardAmount" label="Award amount" />
                   </label>
                   <InputNumber
@@ -1303,16 +1441,35 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
               title="Milestones"
               help={<HelpIcon topic="opportunity.milestones" label="Milestones" />}
               intro={
-                <>
-                  The checklist every entrant builds against — it becomes their progress board. Give one a
-                  date and the board tells a claim on time from a claim behind
-                  <HelpIcon topic="opportunity.milestoneDates" label="Milestone dates" />; give each a share of
-                  the work and entrants know which steps carry it
-                  <HelpIcon topic="opportunity.milestoneShares" label="Milestone shares" />.
-                </>
+                byMilestone ? (
+                  <>
+                    The steps the freelancer you hire works through, in order. Each is handed in, approved and
+                    paid its amount before the next one opens
+                    <HelpIcon topic="opportunity.milestoneAmounts" label="Milestone amounts" />; a date says
+                    when you expect it
+                    <HelpIcon topic="opportunity.milestoneDates" label="Milestone dates" />.
+                  </>
+                ) : (
+                  <>
+                    The checklist every entrant builds against — it becomes their progress board. Give one a
+                    date and the board tells a claim on time from a claim behind
+                    <HelpIcon topic="opportunity.milestoneDates" label="Milestone dates" />; give each a share of
+                    the work and entrants know which steps carry it
+                    <HelpIcon topic="opportunity.milestoneShares" label="Milestone shares" />.
+                  </>
+                )
               }
               aside={
-                sharesStated > 0 ? (
+                byMilestone ? (
+                  <span
+                    className={`text-sm font-medium tabular-nums ${
+                      amountsWhole ? 'text-[var(--text-color-secondary)]' : 'text-amber-600 dark:text-amber-500'
+                    }`}
+                    aria-live="polite"
+                  >
+                    {usd(allocated)} of {usd(total)} allocated
+                  </span>
+                ) : sharesStated > 0 ? (
                   <span
                     className={`text-sm font-medium tabular-nums ${
                       sharesWhole ? 'text-[var(--text-color-secondary)]' : 'text-amber-600 dark:text-amber-500'
@@ -1377,7 +1534,32 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
                           />
                         </div>
                       </div>
-                      {/* The share, at the row's top right — where the page shows it. */}
+                      {/* The share, at the row's top right — where the page shows it;
+                          paid by milestone, what it pays in the same place. */}
+                      {byMilestone ? (
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          <InputNumber
+                            inputId={`c-m-amount-${i}`}
+                            value={m.amount ?? null}
+                            onValueChange={(e) => setMilestone(i, { amount: e.value ?? null })}
+                            mode="currency"
+                            currency="USD"
+                            locale="en-US"
+                            min={0}
+                            maxFractionDigits={2}
+                            placeholder="$0"
+                            className="w-28"
+                            inputClassName="w-full text-right"
+                            aria-label={`Milestone ${i + 1} amount`}
+                          />
+                          <label
+                            htmlFor={`c-m-amount-${i}`}
+                            className="text-xs text-[var(--text-color-secondary)]"
+                          >
+                            pays
+                          </label>
+                        </div>
+                      ) : (
                       <div className="flex shrink-0 flex-col items-end gap-1">
                         <InputNumber
                           inputId={`c-m-share-${i}`}
@@ -1398,6 +1580,7 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
                           share
                         </label>
                       </div>
+                      )}
                       <div className="flex shrink-0 gap-1">
                         <Button
                           icon="pi pi-arrow-up"
@@ -1441,25 +1624,46 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
                     onClick={() =>
                       set('milestones', [
                         ...value.milestones,
-                        { title: '', description: '', dueUtc: null, weightPercent: null },
+                        { title: '', description: '', dueUtc: null, weightPercent: null, amount: null },
                       ])
                     }
                   />
-                  {/* A hundred over the titled milestones, whole numbers, the
-                      remainder to the first — and a way back to no shares at all. */}
-                  <Button
-                    label="Split shares evenly"
-                    icon="pi pi-percentage"
-                    text
-                    size="small"
-                    disabled={titledMilestones.length === 0}
-                    onClick={splitSharesEvenly}
-                  />
-                  {sharesStated > 0 && (
-                    <Button label="Clear shares" icon="pi pi-times" text size="small" onClick={clearShares} />
+                  {byMilestone ? (
+                    // The total in whole dollars over the titled milestones.
+                    <Button
+                      label="Split the total evenly"
+                      icon="pi pi-dollar"
+                      text
+                      size="small"
+                      disabled={titledMilestones.length === 0 || total < 1}
+                      title={total < 1 ? 'Set the total above first.' : undefined}
+                      onClick={splitAmountsEvenly}
+                    />
+                  ) : (
+                    <>
+                      {/* A hundred over the titled milestones, whole numbers, the
+                          remainder to the first — and a way back to no shares at all. */}
+                      <Button
+                        label="Split shares evenly"
+                        icon="pi pi-percentage"
+                        text
+                        size="small"
+                        disabled={titledMilestones.length === 0}
+                        onClick={splitSharesEvenly}
+                      />
+                      {sharesStated > 0 && (
+                        <Button label="Clear shares" icon="pi pi-times" text size="small" onClick={clearShares} />
+                      )}
+                    </>
                   )}
                 </div>
-                {sharesStated > 0 && !sharesWhole && (
+                {byMilestone && titledMilestones.length > 0 && !amountsWhole && (
+                  <p className="mt-2 text-sm text-amber-600 dark:text-amber-500">
+                    To publish, every milestone needs an amount and together they must be the total
+                    {total > 0 ? ` of ${usd(total)}` : ' — set it above'}.
+                  </p>
+                )}
+                {!byMilestone && sharesStated > 0 && !sharesWhole && (
                   <p className="mt-2 text-sm text-amber-600 dark:text-amber-500">
                     To publish, every milestone needs a share and the shares must add up to 100% — or
                     leave every share blank.

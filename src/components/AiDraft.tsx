@@ -106,15 +106,20 @@ export function useFormDraft<T>(feature: FormFeature, form: OpportunityFormSnaps
   const key = formKey(feature, form);
   const read = answered === key;
 
-  const ask = async () => {
+  // The answer comes back too, for a caller that waits on it — the publish
+  // check — rather than reading it off the next render.
+  const ask = async (): Promise<{ draft: FormDraft<T> | null; error: string | null }> => {
     setBusy(true);
     setError(null);
     try {
       const res = await postJson<FormDraft<T>>(`/api/opportunities/ai/${feature}`, form);
       setDraft(res);
       setAnswered(key);
+      return { draft: res, error: null };
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'The draft could not be read.');
+      const message = err instanceof Error ? err.message : 'The draft could not be read.';
+      setError(message);
+      return { draft: null, error: message };
     } finally {
       setBusy(false);
     }
@@ -122,6 +127,9 @@ export function useFormDraft<T>(feature: FormFeature, form: OpportunityFormSnaps
 
   return { draft, output: draft?.output ?? null, ask, busy, error, tooThin, read };
 }
+
+/** One form tool's state, for a component handed the hook its parent holds. */
+export type FormDraftState<T> = ReturnType<typeof useFormDraft<T>>;
 
 /** The two things worth saying around a form draft that is not an error. */
 export function AiFormNotes({ tooThin, stale }: { tooThin: boolean; stale: boolean }) {

@@ -848,15 +848,18 @@ export type AiStatus = {
     requirements: boolean;
     /** The scoring rubric drafted on the opportunity form. */
     criteria: boolean;
+    /** The three award figures suggested on the opportunity form, and the check against them at publish. */
+    award: boolean;
   };
 };
 
 /**
  * The opportunity form as the form-reading AI tools receive it — the whole
  * form on every request, saved or not, in the API's `OpportunityFormSnapshot`
- * shape. No dates, and the award only paid by milestone — the total the
- * milestone draft splits; null otherwise, so it changes nothing a
- * competitive form's drafts read.
+ * shape. No dates — the award suggestion reads the duration in days — and
+ * the award only paid by milestone, the total the milestone draft splits;
+ * null otherwise, so it changes nothing a competitive form's drafts read.
+ * The award suggestion never reads it.
  */
 export type OpportunityFormSnapshot = {
   title: string;
@@ -871,10 +874,16 @@ export type OpportunityFormSnapshot = {
   criteria: { points: number | null; title: string; description: string }[];
   kind: OpportunityKind;
   awardAmount: number | null;
+  /** Whole days from the start day to the deadline; null while the deadline is blank, and the API reads its default. */
+  durationDays: number | null;
+  /** The merit floor; null is no minimum. */
+  minMeritScore: number | null;
+  /** The saved draft this is, if any — the award suggestion is kept with it. Read by no prompt. */
+  draftId: string | null;
 };
 
-/** The six tools that read the opportunity form, by the slug each is asked at. */
-export type FormFeature = 'categorise' | 'coach' | 'requirements' | 'milestones' | 'criteria' | 'seo';
+/** The seven tools that read the opportunity form, by the slug each is asked at. */
+export type FormFeature = 'categorise' | 'coach' | 'requirements' | 'milestones' | 'criteria' | 'seo' | 'award';
 
 /**
  * Which parts of the form each tool reads — the same table as the API's
@@ -895,11 +904,47 @@ export const FORM_READS: Record<FormFeature, (keyof OpportunityFormSnapshot)[]> 
   milestones: ['title', 'briefMarkdown', 'category', 'subcategory', 'skills', 'requirements', 'delivery', 'requiresCompose', 'kind', 'awardAmount'],
   criteria: ['title', 'briefMarkdown', 'category', 'subcategory', 'requirements', 'delivery', 'requiresCompose', 'milestones'],
   seo: ['title', 'briefMarkdown', 'category', 'subcategory'],
+  // Everything above Award and dates, how it pays by kind, and the clock
+  // beside it — never the award itself, which the suggestion must not lean on.
+  award: ['title', 'briefMarkdown', 'category', 'subcategory', 'skills', 'minMeritScore', 'requirements', 'delivery', 'requiresCompose', 'kind', 'durationDays'],
 };
 
 /** What one tool's answer answers: the parts it reads, as one string to compare. */
 export const formKey = (feature: FormFeature, form: OpportunityFormSnapshot): string =>
   JSON.stringify(FORM_READS[feature].map((part) => form[part]));
+
+/** The award suggestion's three figures, in the order a client reads them. */
+export const AWARD_TIERS = ['low', 'competitive', 'attractive'] as const;
+export type AwardTier = (typeof AWARD_TIERS)[number];
+
+/** The award suggestion as the API answers it: a line on the work, and three figures with what each buys. */
+export type AwardSuggestion = {
+  effort: string;
+  low: { amountUsd: number; why: string | null };
+  competitive: { amountUsd: number; why: string | null };
+  attractive: { amountUsd: number; why: string | null };
+  confident: boolean;
+};
+
+/**
+ * Where an award sits against a suggestion — the portal's arithmetic, never
+ * the model's: under the low figure is `below`, over the attractive one is
+ * `above`, and between them the nearest figure, the halfway points between
+ * neighbours being the borders. Null with no award to place.
+ */
+export function awardPlace(amount: number | null, s: AwardSuggestion): AwardTier | 'below' | 'above' | null {
+  if (amount == null || amount <= 0) return null;
+  const [low, mid, high] = AWARD_TIERS.map((t) => s[t].amountUsd);
+  if (amount < low) return 'below';
+  if (amount > high) return 'above';
+  if (amount < (low + mid) / 2) return 'low';
+  if (amount < (mid + high) / 2) return 'competitive';
+  return 'attractive';
+}
+
+/** The suggested figure an award is, exactly — the client took the suggestion — or null for a figure of their own. */
+export const usedTier = (amount: number | null, s: AwardSuggestion): AwardTier | null =>
+  amount == null ? null : (AWARD_TIERS.find((t) => s[t].amountUsd === amount) ?? null);
 
 /** One AI draft as the API reports it. Output is present only when done. */
 export type AiArtifact = {

@@ -11,9 +11,19 @@ import {
   SuggestButton,
   useFormDraft,
   useSuggestionFold,
+  type FormDraftState,
 } from '@/components/AiDraft';
 import type { EditorCriterion, EditorMilestone, EditorRequirement, EditorValue } from '@/components/OpportunityEditor';
-import { utcMoment, type OpportunityCategoryDef, type OpportunityFormSnapshot } from '@/lib/opportunities';
+import {
+  AWARD_TIERS,
+  awardPlace,
+  usedTier,
+  utcMoment,
+  type AwardSuggestion,
+  type AwardTier,
+  type OpportunityCategoryDef,
+  type OpportunityFormSnapshot,
+} from '@/lib/opportunities';
 
 type CoachOutput = { flags: { severity: 'info' | 'warn'; issue: string; suggestion: string | null }[] };
 type MilestonesOutput = { milestones: { title: string; description: string | null; amount?: number | null }[] };
@@ -38,9 +48,29 @@ type CategoryOutput = {
  * press or ignores it.
  */
 
+const DAY_MS = 86_400_000;
+
 /**
- * The form as the tools receive it: the fields they may read, no dates, and
- * money only paid by milestone — the total the milestone draft splits.
+ * How long the opportunity runs in whole days, as the award suggestion reads
+ * it: from the start day — today where it is blank or gone by, the way
+ * publish settles it — to the deadline. Counted from the day rather than the
+ * moment, so it holds still while the form sits open. Null while the
+ * deadline is blank: the API reads the portal's default.
+ */
+function durationDays(value: EditorValue): number | null {
+  if (!value.deadlineUtc) return null;
+  const now = new Date();
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const start = Math.max(today, value.startsAtUtc ? Date.parse(value.startsAtUtc) : today);
+  const days = Math.round((Date.parse(value.deadlineUtc) - start) / DAY_MS);
+  return days >= 1 ? days : null;
+}
+
+/**
+ * The form as the tools receive it: the fields they may read, no dates but
+ * the duration in days, and money only paid by milestone — the total the
+ * milestone draft splits. The award suggestion reads neither the award nor
+ * that total: the client's own figure is what it is weighed against.
  */
 export function toSnapshot(value: EditorValue): OpportunityFormSnapshot {
   return {
@@ -56,6 +86,9 @@ export function toSnapshot(value: EditorValue): OpportunityFormSnapshot {
     criteria: value.criteria.map((c) => ({ points: c.points, title: c.title, description: c.description })),
     kind: value.kind,
     awardAmount: value.kind === 'milestones' ? value.awardAmount : null,
+    durationDays: durationDays(value),
+    minMeritScore: value.minMeritScore || null,
+    draftId: value.id ?? null,
   };
 }
 
@@ -459,6 +492,149 @@ export function AiSeoDraft({
             }}
           />
           {draft && <AiProvenance artifact={draft} />}
+        </AiSuggestionPanel>
+      )}
+    </div>
+  );
+}
+
+const usd = (n: number) => `$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+
+const TIER_LABEL: Record<AwardTier, string> = { low: 'Low', competitive: 'Competitive', attractive: 'Attractive' };
+const TIER_TAG: Record<AwardTier, 'warning' | 'info' | 'success'> = {
+  low: 'warning',
+  competitive: 'info',
+  attractive: 'success',
+};
+
+/** Where an award sits against a suggestion, in words, and how loudly to say it. */
+export type AwardVerdict = {
+  severity: 'warn' | 'info' | 'success';
+  /** Where it sits. */
+  text: string;
+  /** Whether it is a suggested figure or the client's own. */
+  used: string;
+  /** Below the low end or at it: the publish dialog offers the way back to the field first. */
+  low: boolean;
+};
+
+/**
+ * An award placed against the suggestion, in the client's words — the
+ * portal's arithmetic (awardPlace, usedTier), said the same way beside the
+ * field and in the publish dialog. Null with no award to place.
+ */
+export function awardVerdict(amount: number | null, s: AwardSuggestion, byMilestone: boolean): AwardVerdict | null {
+  const place = awardPlace(amount, s);
+  if (place === null || amount == null) return null;
+  const what = byMilestone ? 'total' : 'award';
+  const entering = byMilestone ? 'applying for' : 'entering';
+  const yours = `Your ${what} of ${usd(amount)}`;
+  const text = {
+    below: `${yours} is below the suggested low end of ${usd(s.low.amountUsd)} — for this brief, few freelancers may think it worth ${entering}.`,
+    low: `${yours} sits at the low end of the suggestion — expect a smaller field.`,
+    competitive: `${yours} is competitive for this brief — in line with what work like this usually pays.`,
+    attractive: `${yours} is attractive for this brief — expect a strong field.`,
+    above: `${yours} is above the attractive figure of ${usd(s.attractive.amountUsd)} — expect a strong field.`,
+  }[place];
+  const tier = usedTier(amount, s);
+  return {
+    severity: place === 'below' || place === 'low' ? 'warn' : place === 'competitive' ? 'info' : 'success',
+    text,
+    used: tier ? `It is the suggested ${tier} figure.` : 'It is your own figure — the suggestion was not used.',
+    low: place === 'below' || place === 'low',
+  };
+}
+
+/**
+ * The award suggestion under Award (USD) — Total (USD) paid by milestone: a
+ * line on what the work takes and three figures with what each buys, read
+ * off the brief and the terms above the field, never off the client's own
+ * figure. Where that figure sits among them is said beside them as the
+ * client types, for nothing; the editor holds the hook, because Publish
+ * checks the award against the same answer again.
+ */
+export function AiAwardDraft({
+  award,
+  amount,
+  byMilestone,
+  onUse,
+}: {
+  award: FormDraftState<AwardSuggestion>;
+  /** The award as the field holds it. */
+  amount: number | null;
+  byMilestone: boolean;
+  onUse: (amount: number) => void;
+}) {
+  const { draft, output, ask, busy, error, tooThin, read } = award;
+  const fold = useSuggestionFold(draft);
+  const verdict = output ? awardVerdict(amount, output, byMilestone) : null;
+  const used = output ? usedTier(amount, output) : null;
+
+  return (
+    <div className="mt-2">
+      <SuggestButton
+        label={byMilestone ? 'Suggest a total' : 'Suggest an award'}
+        busy={busy}
+        tooThin={tooThin}
+        read={read}
+        onAsk={() => void ask()}
+        help={<HelpIcon topic="opportunity.aiAward" label="Suggesting an award" />}
+      />
+      <AiFormNotes tooThin={tooThin} stale={draft !== null && !read} />
+      {error && <Message severity="error" text={error} className="mt-2 w-full justify-start" />}
+      {output && draft && (
+        <AiSuggestionPanel title={byMilestone ? 'Suggested total' : 'Suggested award'} fold={fold}>
+          <p className="text-[var(--text-color-secondary)]">{output.effort}</p>
+          <ul className="mt-2 flex flex-col gap-2">
+            {AWARD_TIERS.map((t) => (
+              <li
+                key={t}
+                className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-[var(--surface-border)] p-2"
+              >
+                <Tag value={TIER_LABEL[t]} severity={TIER_TAG[t]} className="w-24 justify-center" />
+                <span className="w-20 text-right font-semibold tabular-nums">{usd(output[t].amountUsd)}</span>
+                {output[t].why && (
+                  <span className="min-w-[12rem] flex-1 text-[var(--text-color-secondary)]">{output[t].why}</span>
+                )}
+                {used === t ? (
+                  <span className="ml-auto text-xs font-medium text-green-700 dark:text-green-400">
+                    <i className="pi pi-check mr-1 text-[0.65rem]" aria-hidden />
+                    Yours
+                  </span>
+                ) : (
+                  <Button
+                    label={`Use ${usd(output[t].amountUsd)}`}
+                    icon="pi pi-arrow-up"
+                    size="small"
+                    text
+                    className="ml-auto"
+                    onClick={() => {
+                      onUse(output[t].amountUsd);
+                      fold.done(`Used: ${t}`);
+                    }}
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
+          {verdict && (
+            <p
+              className={`mt-2 ${verdict.low ? 'font-medium text-amber-600 dark:text-amber-500' : 'text-[var(--text-color-secondary)]'}`}
+              aria-live="polite"
+            >
+              {verdict.text}
+            </p>
+          )}
+          {!output.confident && (
+            <p className="mt-1 text-[var(--text-color-secondary)]">
+              The brief is thin for pricing — worth a second look before you take a figure.
+            </p>
+          )}
+          <p className="mt-2 text-xs text-[var(--text-color-secondary)]">
+            An estimate from what the form says, not a price the portal knows — your{' '}
+            {byMilestone ? 'total' : 'award'} is yours to set. Publish checks it against these figures again.
+          </p>
+          <AiProvenance artifact={draft} />
         </AiSuggestionPanel>
       )}
     </div>

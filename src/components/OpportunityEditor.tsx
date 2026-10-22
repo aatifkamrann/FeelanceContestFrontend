@@ -17,14 +17,18 @@ import { TabPanel, TabView } from 'primereact/tabview';
 import { Toast } from 'primereact/toast';
 import { useQuery } from '@tanstack/react-query';
 import {
+  AiAwardDraft,
   AiCategoryDraft,
   AiCoach,
   AiCriteriaDraft,
   AiMilestonesDraft,
   AiRequirementsDraft,
   AiSeoDraft,
+  awardVerdict,
   toSnapshot,
+  type AwardVerdict,
 } from '@/components/AiBriefTools';
+import { useFormDraft } from '@/components/AiDraft';
 import BriefAttachments from '@/components/BriefAttachments';
 import OpportunityPreview from '@/components/OpportunityPreview';
 import HelpIcon from '@/components/HelpIcon';
@@ -38,6 +42,7 @@ import {
   postJson,
   putJson,
   usesRepo,
+  type AwardSuggestion,
   type OpportunityDelivery,
   type OpportunityKind,
 } from '@/lib/opportunities';
@@ -443,7 +448,7 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
   const [value, setValue] = useState<EditorValue>(() => initial ?? { ...EMPTY, startsAtUtc: todayUtc() });
   const [error, setError] = useState<string | null>(null);
   const [verifyNeeded, setVerifyNeeded] = useState(false);
-  const [busy, setBusy] = useState<'save' | 'publish' | null>(null);
+  const [busy, setBusy] = useState<'save' | 'check' | 'publish' | null>(null);
   /** 0 the form, 1 the preview — Save and Publish sit under both. */
   const [tab, setTab] = useState(0);
   const { data: aiStatus } = useQuery(aiStatusQuery);
@@ -694,7 +699,11 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
   const features = aiStatus?.features;
   const anyFormTool =
     !!features &&
-    (features.coach || features.categorise || features.requirements || features.milestones || features.criteria || features.seo);
+    (features.coach || features.categorise || features.requirements || features.milestones || features.criteria || features.seo || features.award);
+  // The award suggestion lives here rather than in its panel: Publish checks
+  // the award against the same answer, and asks again only when something
+  // it read has changed since.
+  const award = useFormDraft<AwardSuggestion>('award', form);
 
   const payload = () => ({
     title: value.title,
@@ -846,22 +855,73 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
     return null;
   };
 
-  const publish = () => {
+  // The award against the suggestion for the form as it stands: the answer
+  // on screen where it still answers this form, else one more ask — free
+  // when a saved draft or the hour's memory already holds it. Information
+  // for the dialog, never a gate: a check that cannot run says so and the
+  // door stays open.
+  const checkAward = async (): Promise<{ verdict: AwardVerdict | null; failed: string | null } | null> => {
+    if (!features?.award || award.tooThin) return null;
+    let suggestion = award.read ? award.output : null;
+    let failed: string | null = null;
+    if (!suggestion) {
+      setBusy('check');
+      const asked = await award.ask();
+      setBusy(null);
+      suggestion = asked.draft?.output ?? null;
+      failed = asked.error;
+    }
+    return { verdict: suggestion ? awardVerdict(value.awardAmount, suggestion, byMilestone) : null, failed };
+  };
+
+  // Back to the field, from a dialog that said the award was low.
+  const toAward = () => {
+    setTab(0);
+    setTimeout(() => document.getElementById('c-award')?.focus(), 0);
+  };
+
+  const publish = async () => {
     const problem = unfinished();
     if (problem) {
       setError(problem);
       return;
     }
     setError(null);
+    const check = await checkAward();
+    const low = check?.verdict?.low === true && value.awardAmount != null;
+    const what = byMilestone ? 'total' : 'award';
     confirmDialog({
       header: 'Publish this opportunity?',
-      message:
-        'Publishing lists it publicly, opens entry, and locks the brief, milestones and their ' +
-        'dates, the start date, the deadline, the last joining date, and the award. Entrants commit ' +
-        'real time against these terms — they cannot be edited afterwards.',
+      message: (
+        <div className="flex max-w-xl flex-col gap-3">
+          <p>
+            Publishing lists it publicly, opens entry, and locks the brief, milestones and their dates, the start
+            date, the deadline, the last joining date, and the {what}. Entrants commit real time against these
+            terms — they cannot be edited afterwards.
+          </p>
+          {check?.verdict && (
+            <Message
+              severity={check.verdict.severity}
+              className="w-full justify-start"
+              content={
+                <span className="text-sm">
+                  {check.verdict.text} {check.verdict.used}
+                </span>
+              }
+            />
+          )}
+          {check?.failed && (
+            <p className="text-sm text-[var(--text-color-secondary)]">
+              <i className="pi pi-info-circle mr-1" aria-hidden />
+              The {what} check did not run: {check.failed} You can still publish.
+            </p>
+          )}
+        </div>
+      ),
       icon: 'pi pi-exclamation-triangle',
-      acceptLabel: 'Publish',
-      rejectLabel: 'Keep drafting',
+      acceptLabel: low ? `Publish at ${usd(value.awardAmount!)}` : 'Publish',
+      rejectLabel: low ? `Change the ${what}` : 'Keep drafting',
+      reject: low ? toAward : undefined,
       accept: async () => {
         setBusy('publish');
         const saved = await save(true);
@@ -1444,6 +1504,17 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
                   />
                 </div>
               </div>
+              {/* Under the four fields, full width: three figures with their
+                  reasons, read off everything above this panel and the clock
+                  beside the award — never the award itself. */}
+              {features?.award && (
+                <AiAwardDraft
+                  award={award}
+                  amount={value.awardAmount}
+                  byMilestone={byMilestone}
+                  onUse={(amount) => set('awardAmount', amount)}
+                />
+              )}
             </Panel>
 
             <Panel
@@ -1851,10 +1922,11 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
         />
         <div className="flex items-center">
           <Button
-            label="Publish"
+            label={busy === 'check' ? `Checking the ${byMilestone ? 'total' : 'award'}…` : 'Publish'}
             icon="pi pi-send"
-            loading={busy === 'publish'}
-            onClick={publish}
+            loading={busy === 'publish' || busy === 'check'}
+            disabled={busy !== null}
+            onClick={() => void publish()}
           />
           <HelpIcon topic="opportunity.publish" label="Publishing" />
         </div>

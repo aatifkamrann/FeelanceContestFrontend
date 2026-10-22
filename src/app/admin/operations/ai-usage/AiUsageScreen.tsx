@@ -155,6 +155,7 @@ const FEATURE_WORDS: Record<string, string> = {
   applicationEvaluation: 'application evaluations',
   requirementsSuggestion: 'requirements drafts',
   criteriaSuggestion: 'rubric drafts',
+  awardSuggestion: 'award suggestions',
   settingsTest: 'the settings test button',
 };
 const featureWords = (name: string) => FEATURE_WORDS[name] ?? '';

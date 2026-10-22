@@ -23,6 +23,7 @@ import {
   aiStatusQuery,
   meQuery,
   categoriesQuery,
+  offered,
   opportunityStatsQuery,
   fitLabel,
   compactAward,
@@ -161,7 +162,9 @@ export default function OpportunityFeed({ initial, initialFor }: { initial: Feed
 
   const { data: taxonomy } = useQuery(categoriesQuery);
   const categoryDef = taxonomy?.categories.find((c) => c.key === category) ?? null;
-  const subcategoryOptions = categoryDef?.subcategories ?? [];
+  // A retired kind is not offered, unless the address already asks for it.
+  const categoryOptions = offered(taxonomy?.categories, category);
+  const subcategoryOptions = offered(categoryDef?.subcategories, subcategory);
   // A key the taxonomy does not know — an old link, a hand-typed one — is
   // dropped rather than left filtering the feed to nothing; so is a
   // subcategory that is not one of its category's.
@@ -353,7 +356,7 @@ export default function OpportunityFeed({ initial, initialFor }: { initial: Feed
         />
         <Dropdown
           value={category}
-          options={taxonomy?.categories ?? []}
+          options={categoryOptions}
           optionLabel="label"
           optionValue="key"
           placeholder="Any category"

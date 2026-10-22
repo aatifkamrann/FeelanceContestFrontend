@@ -21,9 +21,6 @@ import {
   usesUpload,
   utcDay,
   utcMoment,
-  type BuildCell,
-  type EntrantStanding,
-  type MilestoneState,
 } from '@/lib/opportunities';
 import SiteHeader from '@/components/SiteHeader';
 import HelpIcon from '@/components/HelpIcon';
@@ -36,10 +33,10 @@ import MatchRing from '@/components/MatchRing';
 import ApplicationsLine from '@/components/ApplicationsLine';
 import OpportunityActions from './OpportunityActions';
 import OpportunityTabs from './OpportunityTabs';
+import MilestoneTrack from './MilestoneTrack';
+import BoardMatrix from './BoardMatrix';
 import { EligibilityTab, EvaluationTab, MilestonesTab, RequirementsTab } from './OpportunityTerms';
 import LiveOpportunity from '@/components/LiveOpportunity';
-import BuildMark from '@/components/BuildMark';
-import { StandingBadge } from '@/components/StandingBadge';
 
 export const dynamic = 'force-dynamic';
 
@@ -87,6 +84,10 @@ export default async function OpportunityPage({ params }: { params: Promise<{ sl
   const begun = startedAt(opportunity.startsAtUtc, opportunity.publishedAtUtc);
   const duration = opportunityDuration(begun, opportunity.deadlineUtc);
   const hasBoard = opportunity.showBoard && opportunity.entrants.length > 0 && opportunity.status !== 'draft';
+  // Paid by milestone, the board is the hired freelancer's track: their
+  // milestones in order with each one's review and payment — shown to the
+  // two parties whatever the board setting, since the payments are theirs.
+  const hasTrack = opportunity.kind === 'milestones' && !!opportunity.award?.payments && opportunity.status !== 'draft';
   // Whether any milestone carries a date at all. Without one the board says
   // done or not done, exactly as it did before dates existed.
   const dated = opportunity.milestones.some((m) => m.dueUtc);
@@ -108,330 +109,271 @@ export default async function OpportunityPage({ params }: { params: Promise<{ sl
     <>
       <SiteHeader />
       <main className="mx-auto max-w-6xl px-4 py-8">
+        {/* The page is three bands: the opportunity itself, the board across
+            the whole width — a matrix of five or more milestones needs it —
+            and then the brief's tabs with the rail beside them. */}
+        <div>
+        {/* The page's top line: the opportunity's clock, in words, at the
+            left; the viewer's match at the right. */}
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <span>
+            <LivePulse state={hiredAtWork ? 'live' : pulseState(opportunity)} prefix="Opportunity" />
+          </span>
+          {opportunity.viewerFit && <MatchRing fit={opportunity.viewerFit} />}
+        </div>
+        {/* What kind of work, over the title — the first word a reader
+            sorts the page by; the finer kind rides after it. */}
+        {opportunity.categoryLabel && (
+          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--primary-color)]">
+            {opportunity.categoryLabel}
+            {opportunity.subcategoryLabel && (
+              <span className="font-normal text-[var(--text-color-secondary)]">
+                {' · '}
+                {opportunity.subcategoryLabel}
+              </span>
+            )}
+          </p>
+        )}
+        <h1 className="mt-1 text-3xl font-bold">{opportunity.title}</h1>
+        <p className="mt-2 flex items-center gap-2 text-sm text-[var(--text-color-secondary)]">
+          <Avatar name={opportunity.clientName} url={opportunity.clientAvatarUrl} size="xs" />
+          Opportunity by {opportunity.clientName}
+        </p>
+
+        {/* The cancellation notice — the page stays up because entrants
+            hold links to it, and the notice is what those links owe them. */}
+        {opportunity.status === 'cancelled' && (
+          <div className="mt-4 rounded-xl border border-[var(--surface-border)] bg-[var(--surface-hover)] p-4">
+            <p className="font-semibold">
+              <i className="pi pi-ban mr-2 text-[var(--text-color-secondary)]" aria-hidden />
+              This opportunity was cancelled
+              {opportunity.cancelledAtUtc &&
+                ` on ${new Date(opportunity.cancelledAtUtc).toLocaleDateString('en-GB', {
+                  day: 'numeric',
+                  month: 'short',
+                  year: 'numeric',
+                })}`}
+            </p>
+            {opportunity.cancelReason && (
+              <p className="mt-1 text-sm">
+                The client&apos;s reason: <span className="italic">“{opportunity.cancelReason}”</span>
+              </p>
+            )}
+            <p className="mt-1 text-sm text-[var(--text-color-secondary)]">
+              Entries are void and no winner will be chosen. Every entrant keeps their own
+              work — repositories were archived, never transferred.
+            </p>
+          </div>
+        )}
+
+        {opportunity.award && (
+          <div className="mt-4 rounded-xl border border-[var(--primary-color)] bg-[color-mix(in_srgb,var(--primary-color)_8%,transparent)] p-4">
+            {opportunity.kind === 'milestones' ? (
+              // Paid by milestone: who was hired, and how much of the
+              // total has been paid — as public as a competitive award's paid line.
+              <div className="flex items-center gap-3">
+                <i className="pi pi-briefcase text-2xl text-[var(--primary-color)]" aria-hidden />
+                <div>
+                  <p className="font-semibold">Hired: {opportunity.award.winnerName}</p>
+                  <p className="text-sm text-[var(--text-color-secondary)]">
+                    {formatAward(opportunity.award.amountPaid ?? 0, opportunity.currency)} of{' '}
+                    {formatAward(opportunity.awardAmount, opportunity.currency)} paid
+                    {' · '}
+                    {(opportunity.award.payments ?? []).filter((p) => p.state === 'paid').length} of{' '}
+                    {opportunity.milestones.length} milestones
+                    {opportunity.award.paidAtUtc && (
+                      <span className="font-medium text-green-700 dark:text-green-400"> · paid in full</span>
+                    )}
+                  </p>
+                </div>
+              </div>
+            ) : (
+            <div className="flex items-center gap-3">
+              <i className="pi pi-trophy text-2xl text-[var(--primary-color)]" aria-hidden />
+              <div>
+                <p className="font-semibold">Winner: {opportunity.award.winnerName}</p>
+                <p className="text-sm text-[var(--text-color-secondary)]">
+                  Announced{' '}
+                  {new Date(opportunity.award.announcedAtUtc).toLocaleDateString('en-GB', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric',
+                  })}
+                  {' · '}
+                  {formatAward(opportunity.awardAmount, opportunity.currency)}
+                  {' · '}
+                  {/* Public on purpose: an award left unpaid is visible
+                      to everyone who looks. */}
+                  {opportunity.award.paidAtUtc ? (
+                    <span className="font-medium text-green-700 dark:text-green-400">
+                      paid{' '}
+                      {new Date(opportunity.award.paidAtUtc).toLocaleDateString('en-GB', {
+                        day: 'numeric',
+                        month: 'short',
+                      })}
+                    </span>
+                  ) : (
+                    <span className="font-medium text-amber-600">payment pending</span>
+                  )}
+                </p>
+              </div>
+            </div>
+            )}
+            {(opportunity.award.ratingOfClient || opportunity.award.ratingOfWinner) && (
+              <div className="mt-3 flex flex-col gap-2 border-t border-[var(--surface-border)] pt-3 text-sm">
+                {opportunity.award.ratingOfClient && (
+                  <PublicRating
+                    rating={opportunity.award.ratingOfClient}
+                    about={`working with ${opportunity.clientName}`}
+                  />
+                )}
+                {opportunity.award.ratingOfWinner && (
+                  <PublicRating
+                    rating={opportunity.award.ratingOfWinner}
+                    about={`working with ${opportunity.award.winnerName}`}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* The opportunity in four figures — the box the draft's preview wears too. */}
+        <OpportunityFigures
+          awardAmount={opportunity.awardAmount}
+          currency={opportunity.currency}
+          deadlineUtc={opportunity.deadlineUtc}
+          status={opportunity.status}
+          entrantCount={opportunity.entrantCount}
+          maxEntries={opportunity.maxEntries}
+          milestoneCount={opportunity.milestones.length}
+          className="mt-5"
+        />
+        {/* The moments themselves, under the figures. A cancelled
+            opportunity has no countdown — nothing closes any more. */}
+        {opportunity.deadlineUtc && opportunity.status !== 'cancelled' && (
+          <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--text-color-secondary)]">
+            {/* The start, where the client set one — information, not a
+                gate: entry is open from publishing, and the start is where
+                the opportunity duration counts from. */}
+            {opportunity.startsAtUtc && begun && (
+              <span>
+                <i className="pi pi-calendar mr-1" aria-hidden />
+                {starting ? `Starts ${utcDay(begun)} · ${starting}` : `Started ${utcDay(begun)}`}
+                {duration && ` · runs ${duration}`}
+              </span>
+            )}
+            <span>
+              <i className="pi pi-clock mr-1" aria-hidden />
+              Deadline {utcMoment(opportunity.deadlineUtc)}
+              {' · '}
+              {closing}
+            </span>
+            {/* Only where the two dates actually differ. An opportunity whose
+                entry runs to the deadline has nothing extra to say. */}
+            {opportunity.entryClosesEarly && opportunity.entryCloseUtc && opportunity.status === 'open' && (
+              <span className={opportunity.entryOpen ? '' : 'font-medium text-amber-600 dark:text-amber-500'}>
+                <i className="pi pi-sign-in mr-1" aria-hidden />
+                {joining}
+                {' · '}
+                {utcMoment(opportunity.entryCloseUtc)}
+              </span>
+            )}
+          </p>
+        )}
+
+        {/* Who it is for — the terms the entry door checks. The kind of
+            work is already over the title. */}
+        <OpportunityFacts
+          categoryLabel={null}
+          subcategoryLabel={null}
+          skills={opportunity.skills}
+          minMeritScore={opportunity.minMeritScore}
+          requiresCompose={opportunity.requiresCompose}
+          className="mt-3"
+        />
+
+        {/* Open, building, and shut to newcomers — a state the status
+            badge alone cannot show, and the one a visitor most needs
+            explained before they look for a join button that is gone. */}
+        {opportunity.status === 'open' && !opportunity.entryOpen && (
+          <div className="mt-4 rounded-xl border border-[var(--surface-border)] bg-[var(--surface-hover)] p-4 text-sm">
+            <p className="font-semibold">
+              <i className="pi pi-lock mr-2 text-[var(--text-color-secondary)]" aria-hidden />
+              Entry closed{opportunity.entryCloseUtc && ` on ${utcMoment(opportunity.entryCloseUtc)}`}
+            </p>
+            <p className="mt-1 text-[var(--text-color-secondary)]">
+              The client set a last joining date ahead of the deadline. The{' '}
+              {count(opportunity.entrantCount, 'entrant')} already in build on until the deadline —
+              the board below stays live, and the award is still to be decided.
+            </p>
+          </div>
+        )}
+        </div>
+
+        {/* The checkpoint board — checkpoints pivoted: one row per
+            entrant, one column per milestone, stamped by webhooks when a
+            tag m1, m2… lands. Public by default; an operator can restrict
+            it to the opportunity owner (features.publicMilestoneBoard).
+            Paid by milestone, it is the hired freelancer's track instead. */}
+        {(hasTrack || hasBoard) && (
+          <Fold
+            id="opportunity-board"
+            className="mt-8 p-6"
+            title="Progress board"
+            extra={
+              <>
+                <span className="text-sm text-[var(--text-color-secondary)]">
+                  {hasTrack
+                    ? opportunity.award?.paidAtUtc
+                      ? '— every milestone approved and paid; the board is final'
+                      : opportunity.status === 'cancelled'
+                        ? '— the job was cancelled; the board is final'
+                        : `— milestones handed in by ${claimedBy}, each reviewed and paid before the next opens`
+                    : decided
+                      ? `— milestones claimed by ${claimedBy} before the opportunity closed; the board is final, best standing first`
+                      : `— milestones claimed by ${claimedBy}, ${liveFrom}, best standing first`}
+                </span>
+                {hasTrack && <HelpIcon topic="opportunity.milestoneReview" label="Reviewing a milestone" />}
+                {/* The pill promises movement a decided board cannot show.
+                    The watch itself stays: a paid award still reaches the
+                    page — and it sits in the heading so a folded board
+                    keeps watching. */}
+                <LiveOpportunity slug={opportunity.slug} badge={!decided} />
+              </>
+            }
+          >
+            {/* The daily AI note — drafted from exactly the rows below,
+                and labelled, because the board is the record and this is
+                only its readable retelling. */}
+            {opportunity.narrative && (
+              <div className="mt-3 rounded-lg border border-[var(--surface-border)] bg-[var(--surface-hover)] p-3 text-sm">
+                <p>
+                  <i className="pi pi-sparkles mr-1 text-[var(--primary-color)]" aria-hidden />
+                  {opportunity.narrative.text}
+                </p>
+                <p className="mt-1 text-xs text-[var(--text-color-secondary)]">
+                  AI-drafted daily note · {relativeTime(opportunity.narrative.atUtc)}
+                  <HelpIcon topic="opportunity.progressNarrative" label="The daily board note" />
+                </p>
+              </div>
+            )}
+            {hasTrack ? (
+              <MilestoneTrack slug={opportunity.slug} initial={opportunity} />
+            ) : (
+              <BoardMatrix
+                slug={opportunity.slug}
+                initial={opportunity}
+                dated={dated}
+                activityHeading={activityHeading}
+              />
+            )}
+          </Fold>
+        )}
+
         <div className="flex flex-col gap-8 lg:flex-row">
           {/* ------------------------------------------------ main column */}
           <div className="min-w-0 flex-1">
-            {/* The page's top line: the opportunity's clock, in words, at the
-                left; the viewer's match at the right. */}
-            <div className="mb-3 flex items-start justify-between gap-3">
-              <span>
-                <LivePulse state={hiredAtWork ? 'live' : pulseState(opportunity)} prefix="Opportunity" />
-              </span>
-              {opportunity.viewerFit && <MatchRing fit={opportunity.viewerFit} />}
-            </div>
-            {/* What kind of work, over the title — the first word a reader
-                sorts the page by; the finer kind rides after it. */}
-            {opportunity.categoryLabel && (
-              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--primary-color)]">
-                {opportunity.categoryLabel}
-                {opportunity.subcategoryLabel && (
-                  <span className="font-normal text-[var(--text-color-secondary)]">
-                    {' · '}
-                    {opportunity.subcategoryLabel}
-                  </span>
-                )}
-              </p>
-            )}
-            <h1 className="mt-1 text-3xl font-bold">{opportunity.title}</h1>
-            <p className="mt-2 flex items-center gap-2 text-sm text-[var(--text-color-secondary)]">
-              <Avatar name={opportunity.clientName} url={opportunity.clientAvatarUrl} size="xs" />
-              Opportunity by {opportunity.clientName}
-            </p>
-
-            {/* The cancellation notice — the page stays up because entrants
-                hold links to it, and the notice is what those links owe them. */}
-            {opportunity.status === 'cancelled' && (
-              <div className="mt-4 rounded-xl border border-[var(--surface-border)] bg-[var(--surface-hover)] p-4">
-                <p className="font-semibold">
-                  <i className="pi pi-ban mr-2 text-[var(--text-color-secondary)]" aria-hidden />
-                  This opportunity was cancelled
-                  {opportunity.cancelledAtUtc &&
-                    ` on ${new Date(opportunity.cancelledAtUtc).toLocaleDateString('en-GB', {
-                      day: 'numeric',
-                      month: 'short',
-                      year: 'numeric',
-                    })}`}
-                </p>
-                {opportunity.cancelReason && (
-                  <p className="mt-1 text-sm">
-                    The client&apos;s reason: <span className="italic">“{opportunity.cancelReason}”</span>
-                  </p>
-                )}
-                <p className="mt-1 text-sm text-[var(--text-color-secondary)]">
-                  Entries are void and no winner will be chosen. Every entrant keeps their own
-                  work — repositories were archived, never transferred.
-                </p>
-              </div>
-            )}
-
-            {opportunity.award && (
-              <div className="mt-4 rounded-xl border border-[var(--primary-color)] bg-[color-mix(in_srgb,var(--primary-color)_8%,transparent)] p-4">
-                {opportunity.kind === 'milestones' ? (
-                  // Paid by milestone: who was hired, and how much of the
-                  // total has been paid — as public as a competitive award's paid line.
-                  <div className="flex items-center gap-3">
-                    <i className="pi pi-briefcase text-2xl text-[var(--primary-color)]" aria-hidden />
-                    <div>
-                      <p className="font-semibold">Hired: {opportunity.award.winnerName}</p>
-                      <p className="text-sm text-[var(--text-color-secondary)]">
-                        {formatAward(opportunity.award.amountPaid ?? 0, opportunity.currency)} of{' '}
-                        {formatAward(opportunity.awardAmount, opportunity.currency)} paid
-                        {' · '}
-                        {(opportunity.award.payments ?? []).filter((p) => p.state === 'paid').length} of{' '}
-                        {opportunity.milestones.length} milestones
-                        {opportunity.award.paidAtUtc && (
-                          <span className="font-medium text-green-700 dark:text-green-400"> · paid in full</span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                <div className="flex items-center gap-3">
-                  <i className="pi pi-trophy text-2xl text-[var(--primary-color)]" aria-hidden />
-                  <div>
-                    <p className="font-semibold">Winner: {opportunity.award.winnerName}</p>
-                    <p className="text-sm text-[var(--text-color-secondary)]">
-                      Announced{' '}
-                      {new Date(opportunity.award.announcedAtUtc).toLocaleDateString('en-GB', {
-                        day: 'numeric',
-                        month: 'short',
-                        year: 'numeric',
-                      })}
-                      {' · '}
-                      {formatAward(opportunity.awardAmount, opportunity.currency)}
-                      {' · '}
-                      {/* Public on purpose: an award left unpaid is visible
-                          to everyone who looks. */}
-                      {opportunity.award.paidAtUtc ? (
-                        <span className="font-medium text-green-700 dark:text-green-400">
-                          paid{' '}
-                          {new Date(opportunity.award.paidAtUtc).toLocaleDateString('en-GB', {
-                            day: 'numeric',
-                            month: 'short',
-                          })}
-                        </span>
-                      ) : (
-                        <span className="font-medium text-amber-600">payment pending</span>
-                      )}
-                    </p>
-                  </div>
-                </div>
-                )}
-                {(opportunity.award.ratingOfClient || opportunity.award.ratingOfWinner) && (
-                  <div className="mt-3 flex flex-col gap-2 border-t border-[var(--surface-border)] pt-3 text-sm">
-                    {opportunity.award.ratingOfClient && (
-                      <PublicRating
-                        rating={opportunity.award.ratingOfClient}
-                        about={`working with ${opportunity.clientName}`}
-                      />
-                    )}
-                    {opportunity.award.ratingOfWinner && (
-                      <PublicRating
-                        rating={opportunity.award.ratingOfWinner}
-                        about={`working with ${opportunity.award.winnerName}`}
-                      />
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* The opportunity in four figures — the box the draft's preview wears too. */}
-            <OpportunityFigures
-              awardAmount={opportunity.awardAmount}
-              currency={opportunity.currency}
-              deadlineUtc={opportunity.deadlineUtc}
-              status={opportunity.status}
-              entrantCount={opportunity.entrantCount}
-              maxEntries={opportunity.maxEntries}
-              milestoneCount={opportunity.milestones.length}
-              className="mt-5"
-            />
-            {/* The moments themselves, under the figures. A cancelled
-                opportunity has no countdown — nothing closes any more. */}
-            {opportunity.deadlineUtc && opportunity.status !== 'cancelled' && (
-              <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--text-color-secondary)]">
-                {/* The start, where the client set one — information, not a
-                    gate: entry is open from publishing, and the start is where
-                    the opportunity duration counts from. */}
-                {opportunity.startsAtUtc && begun && (
-                  <span>
-                    <i className="pi pi-calendar mr-1" aria-hidden />
-                    {starting ? `Starts ${utcDay(begun)} · ${starting}` : `Started ${utcDay(begun)}`}
-                    {duration && ` · runs ${duration}`}
-                  </span>
-                )}
-                <span>
-                  <i className="pi pi-clock mr-1" aria-hidden />
-                  Deadline {utcMoment(opportunity.deadlineUtc)}
-                  {' · '}
-                  {closing}
-                </span>
-                {/* Only where the two dates actually differ. An opportunity whose
-                    entry runs to the deadline has nothing extra to say. */}
-                {opportunity.entryClosesEarly && opportunity.entryCloseUtc && opportunity.status === 'open' && (
-                  <span className={opportunity.entryOpen ? '' : 'font-medium text-amber-600 dark:text-amber-500'}>
-                    <i className="pi pi-sign-in mr-1" aria-hidden />
-                    {joining}
-                    {' · '}
-                    {utcMoment(opportunity.entryCloseUtc)}
-                  </span>
-                )}
-              </p>
-            )}
-
-            {/* Who it is for — the terms the entry door checks. The kind of
-                work is already over the title. */}
-            <OpportunityFacts
-              categoryLabel={null}
-              subcategoryLabel={null}
-              skills={opportunity.skills}
-              minMeritScore={opportunity.minMeritScore}
-              requiresCompose={opportunity.requiresCompose}
-              className="mt-3"
-            />
-
-            {/* Open, building, and shut to newcomers — a state the status
-                badge alone cannot show, and the one a visitor most needs
-                explained before they look for a join button that is gone. */}
-            {opportunity.status === 'open' && !opportunity.entryOpen && (
-              <div className="mt-4 rounded-xl border border-[var(--surface-border)] bg-[var(--surface-hover)] p-4 text-sm">
-                <p className="font-semibold">
-                  <i className="pi pi-lock mr-2 text-[var(--text-color-secondary)]" aria-hidden />
-                  Entry closed{opportunity.entryCloseUtc && ` on ${utcMoment(opportunity.entryCloseUtc)}`}
-                </p>
-                <p className="mt-1 text-[var(--text-color-secondary)]">
-                  The client set a last joining date ahead of the deadline. The{' '}
-                  {count(opportunity.entrantCount, 'entrant')} already in build on until the deadline —
-                  the board below stays live, and the award is still to be decided.
-                </p>
-              </div>
-            )}
-
-            {/* The checkpoint board — checkpoints pivoted: one row per
-                entrant, one column per milestone, stamped by webhooks when a
-                tag m1, m2… lands. Public by default; an operator can restrict
-                it to the opportunity owner (features.publicMilestoneBoard). */}
-            {hasBoard && (
-              <Fold
-                id="opportunity-board"
-                className="mt-8 p-6"
-                title="Progress board"
-                extra={
-                  <>
-                    <span className="text-sm text-[var(--text-color-secondary)]">
-                      {decided
-                        ? `— milestones claimed by ${claimedBy} before the opportunity closed; the board is final`
-                        : `— milestones claimed by ${claimedBy}, ${liveFrom}`}
-                      , best standing first
-                    </span>
-                    {/* The pill promises movement a decided board cannot show.
-                        The watch itself stays: a paid award still reaches the
-                        page — and it sits in the heading so a folded board
-                        keeps watching. */}
-                    <LiveOpportunity slug={opportunity.slug} badge={!decided} />
-                  </>
-                }
-              >
-                {/* The daily AI note — drafted from exactly the rows below,
-                    and labelled, because the board is the record and this is
-                    only its readable retelling. */}
-                {opportunity.narrative && (
-                  <div className="mt-3 rounded-lg border border-[var(--surface-border)] bg-[var(--surface-hover)] p-3 text-sm">
-                    <p>
-                      <i className="pi pi-sparkles mr-1 text-[var(--primary-color)]" aria-hidden />
-                      {opportunity.narrative.text}
-                    </p>
-                    <p className="mt-1 text-xs text-[var(--text-color-secondary)]">
-                      AI-drafted daily note · {relativeTime(opportunity.narrative.atUtc)}
-                      <HelpIcon topic="opportunity.progressNarrative" label="The daily board note" />
-                    </p>
-                  </div>
-                )}
-                <div className="mt-4 overflow-x-auto">
-                  <table className="w-full min-w-[420px] border-collapse text-sm">
-                    <thead>
-                      <tr className="text-left text-[var(--text-color-secondary)]">
-                        <th className="pb-2 pr-4 font-medium">Entrant</th>
-                        {opportunity.milestones.map((m, i) => (
-                          <th
-                            key={i}
-                            className="pb-2 text-center font-medium"
-                            title={m.dueUtc ? `${m.title} — due by ${utcMoment(m.dueUtc)}` : m.title}
-                          >
-                            m{i + 1}
-                            {m.dueUtc && (
-                              <span className="block text-xs font-normal">
-                                {new Date(m.dueUtc).toLocaleDateString('en-GB', {
-                                  day: 'numeric',
-                                  month: 'short',
-                                  timeZone: 'UTC',
-                                })}
-                              </span>
-                            )}
-                          </th>
-                        ))}
-                        <th className="pb-2 pl-4 text-right font-medium whitespace-nowrap">
-                          Standing
-                          <HelpIcon topic="opportunity.standingScore" label="The standing score" />
-                        </th>
-                        {upload && <th className="pb-2 pl-4 text-right font-medium">Files</th>}
-                        <th className="pb-2 pl-4 text-right font-medium">{activityHeading}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {opportunity.entrants.map((e, row) => (
-                        <tr key={row} className="border-t border-[var(--surface-border)]">
-                          <td className="py-2 pr-4 font-medium">
-                            <span className="flex items-center gap-2">
-                              <Avatar name={e.displayName} url={e.avatarUrl} size="xs" />
-                              {e.displayName}
-                            </span>
-                          </td>
-                          {opportunity.milestones.map((m, i) => (
-                            <td key={i} className="py-2 text-center">
-                              <BoardCell
-                                n={i + 1}
-                                state={
-                                  e.milestoneStates?.[i] ??
-                                  (e.milestonesDone?.includes(i + 1) ? 'claimed' : 'open')
-                                }
-                                dueUtc={m.dueUtc}
-                                build={e.builds?.[i]}
-                              />
-                            </td>
-                          ))}
-                          <td className="py-2 pl-4 text-right whitespace-nowrap">
-                            {/* The score the row is placed by, and its reading. */}
-                            {e.standingScore !== null && e.standingBand ? (
-                              <StandingBadge score={e.standingScore} band={e.standingBand} />
-                            ) : (
-                              <span className="text-[var(--text-color-secondary)]">—</span>
-                            )}
-                            {/* The on-time counts under the number: the
-                                biggest part of it, and what a person reads. */}
-                            {dated && e.standing && (
-                              <div className="mt-0.5 text-xs">
-                                <Standing standing={e.standing} />
-                              </div>
-                            )}
-                          </td>
-                          {upload && (
-                            <td className="py-2 pl-4 text-right text-[var(--text-color-secondary)]">
-                              {e.filesUploaded ?? '—'}
-                            </td>
-                          )}
-                          <td className="py-2 pl-4 text-right text-[var(--text-color-secondary)]">
-                            {e.lastPushAtUtc ? relativeTime(e.lastPushAtUtc) : '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </Fold>
-            )}
-
             {/* The brief and the terms beside it — requirements, milestones,
                 evaluation, eligibility — and the entrants: six tabs over one
                 card, the brief first. */}
@@ -579,8 +521,9 @@ export default async function OpportunityPage({ params }: { params: Promise<{ sl
             {!hasBoard && opportunity.status !== 'draft' && <LiveOpportunity slug={opportunity.slug} />}
           </div>
 
-          {/* ------------------------------------------------- right rail */}
-          <aside className="w-full shrink-0 lg:w-80">
+          {/* ------------------------------------------------- right rail:
+              level with the tabs, under the board. */}
+          <aside className="w-full shrink-0 lg:mt-6 lg:w-80">
             <OpportunityActions
               slug={opportunity.slug}
               status={opportunity.status}
@@ -708,87 +651,5 @@ function PublicRating({
       </span>
       {rating.comment && <span> — “{rating.comment}”</span>}
     </p>
-  );
-}
-
-/**
- * One cell of the progress board, read against its milestone's date. A
- * milestone with no date shows only claimed or open — which is every cell on
- * every opportunity published before dates existed, and still the right answer
- * for exploratory work.
- */
-function BoardCell({
-  n,
-  state,
-  dueUtc,
-  build,
-}: {
-  n: number;
-  state: MilestoneState;
-  dueUtc: string | null;
-  /** The claim's build, on an opportunity that requires one — a second mark under the first. */
-  build?: BuildCell;
-}) {
-  const by = dueUtc ? ` (due ${utcMoment(dueUtc)})` : '';
-  const shown = {
-    on_time: {
-      icon: 'pi-check-circle',
-      className: 'text-[var(--primary-color)]',
-      label: `milestone ${n} claimed on time${by}`,
-    },
-    late: {
-      icon: 'pi-clock',
-      className: 'text-amber-600 dark:text-amber-500',
-      label: `milestone ${n} claimed late${by}`,
-    },
-    claimed: {
-      icon: 'pi-check-circle',
-      className: 'text-[var(--primary-color)]',
-      label: `milestone ${n} claimed`,
-    },
-    overdue: {
-      icon: 'pi-exclamation-circle',
-      className: 'text-red-600 dark:text-red-400',
-      label: `milestone ${n} overdue${by}`,
-    },
-  }[state as 'on_time' | 'late' | 'claimed' | 'overdue'];
-
-  if (!shown)
-    return (
-      <span className="text-[var(--surface-border)]" title={`Not claimed yet${by}`} aria-label={`milestone ${n} open${by}`}>
-        ·
-      </span>
-    );
-  return (
-    <span className="inline-flex flex-col items-center">
-      <i className={`pi ${shown.icon} ${shown.className}`} title={shown.label} aria-label={shown.label} />
-      <BuildMark n={n} build={build} />
-    </span>
-  );
-}
-
-/**
- * One entrant's row summarised — the counts the board is ordered by. Only
- * the parts that are non-zero: "3 on time" on a clean row, without two
- * zeroes beside it saying nothing.
- */
-function Standing({ standing }: { standing: EntrantStanding }) {
-  const parts = [
-    standing.onTime > 0 && { text: `${standing.onTime} on time`, className: 'text-[var(--primary-color)]' },
-    standing.late > 0 && { text: `${standing.late} late`, className: 'text-amber-600 dark:text-amber-500' },
-    standing.overdue > 0 && { text: `${standing.overdue} overdue`, className: 'text-red-600 dark:text-red-400' },
-  ].filter(Boolean) as { text: string; className: string }[];
-
-  if (parts.length === 0)
-    return <span className="text-[var(--text-color-secondary)]">not started</span>;
-  return (
-    <span className="font-medium">
-      {parts.map((p, i) => (
-        <span key={p.text} className={p.className}>
-          {i > 0 && <span className="font-normal text-[var(--text-color-secondary)]"> · </span>}
-          {p.text}
-        </span>
-      ))}
-    </span>
   );
 }

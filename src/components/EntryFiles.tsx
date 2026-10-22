@@ -46,11 +46,24 @@ export function EntryUploads({
   const [error, setError] = useState<string | null>(null);
   const [milestone, setMilestone] = useState<number | null>(null);
 
-  // Milestones this entry has not claimed yet — the only ones a file can claim.
+  // A file tagged with a milestone not claimed yet claims it. Competitive, a
+  // claimed one can be tagged too: the file is an update to it — after the
+  // client asked for changes, say — which they open beside the claim. Paid
+  // by milestone, handing in again has its own button on the board.
   const claimed = new Set(files.map((f) => f.milestone).filter((m): m is number => m !== null));
   const claimable = milestones
-    .map((m, i) => ({ label: `m${i + 1} — ${m.title}`, value: i + 1 }))
-    .filter((o) => !claimed.has(o.value));
+    .map((m, i) => ({
+      label: claimed.has(i + 1) ? `m${i + 1} — ${m.title} (an update)` : `m${i + 1} — ${m.title}`,
+      value: i + 1,
+    }))
+    .filter((o) => !byMilestone || !claimed.has(o.value));
+  // The file that claimed each milestone: the first one tagged with it.
+  const claimFiles = new Set(
+    files
+      .filter((f) => f.milestone !== null)
+      .filter((f, i, all) => all.findIndex((g) => g.milestone === f.milestone) === i)
+      .map((f) => f.id),
+  );
 
   const upload = async (file: File) => {
     setBusy(file.name);
@@ -97,7 +110,7 @@ export function EntryUploads({
         {open
           ? byMilestone
             ? 'Hand each milestone in here: tag the file with it, and the client reviews it. The client can open your files as you go.'
-            : 'Hand your work in here. Tag a file to a milestone to claim it on the board. Nobody but you opens these before the deadline.'
+            : 'Hand your work in here. Tag a file to a milestone to claim it on the board: the client can then open that milestone’s files and review it. Nobody but you opens the rest before the deadline.'
           : uploadProblem}
       </p>
 
@@ -109,9 +122,12 @@ export function EntryUploads({
           detail={(f) => (
             <>
               {relativeTime(f.uploadedAtUtc)}
-              {f.milestone !== null && (
-                <Tag value={`claimed m${f.milestone}`} icon="pi pi-check" severity="info" />
-              )}
+              {f.milestone !== null &&
+                (claimFiles.has(f.id) ? (
+                  <Tag value={`claimed m${f.milestone}`} icon="pi pi-check" severity="info" />
+                ) : (
+                  <Tag value={`m${f.milestone} update`} icon="pi pi-refresh" severity="secondary" />
+                ))}
             </>
           )}
           action={
@@ -123,11 +139,14 @@ export function EntryUploads({
                     size="small"
                     severity="danger"
                     className="!h-7 !w-7 !p-0"
-                    // A file that claimed a milestone stays — the board is the record.
+                    // A file tagged with a milestone stays — the board is the
+                    // record, and the client may be reviewing it.
                     disabled={busy !== null || f.milestone !== null}
                     title={
                       f.milestone !== null
-                        ? `This file claimed m${f.milestone}; claims are not undone.`
+                        ? claimFiles.has(f.id)
+                          ? `This file claimed m${f.milestone}; claims are not undone.`
+                          : `This file is an update to m${f.milestone}; milestone files stay.`
                         : `Delete ${f.fileName}`
                     }
                     onClick={() => remove(f)}
@@ -165,10 +184,10 @@ export function EntryUploads({
               value={milestone}
               options={claimable}
               onChange={(e) => setMilestone(e.value ?? null)}
-              placeholder="Claims no milestone"
+              placeholder="For no milestone"
               showClear
               className="text-sm"
-              aria-label="Milestone this file claims"
+              aria-label="Milestone this file is for"
             />
           )}
         </div>

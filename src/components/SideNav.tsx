@@ -90,6 +90,8 @@ export function navItemsFor(role: string | null | undefined, legal: LegalLink[] 
       { href: '/admin/activity', label: 'Activity', icon: 'pi pi-history' },
       // Members' conversations, read-only, for moderation.
       { href: '/admin/conversations', label: 'Conversations', icon: 'pi pi-comments' },
+      // The kinds of work opportunities are filed under and members say they do.
+      { href: '/admin/categories', label: 'Categories', icon: 'pi pi-tags' },
       { href: '/admin/database', label: 'Database', icon: 'pi pi-database' },
       { href: '/admin/settings', label: 'Settings', icon: 'pi pi-cog' },
       // Stuck machinery and the buttons that restart it, then what runs
@@ -131,7 +133,7 @@ export function isHere(pathname: string, item: NavItem): boolean {
 export function navLinkClass(here: boolean): string {
   return `flex items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm no-underline transition-colors ${
     here
-      ? 'bg-[var(--primary-color)]/10 font-semibold text-[var(--primary-color)]'
+      ? 'bg-[color-mix(in_srgb,var(--primary-color)_10%,transparent)] font-semibold text-[var(--primary-color)]'
       : 'text-[var(--text-color-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-color)]'
   }`;
 }

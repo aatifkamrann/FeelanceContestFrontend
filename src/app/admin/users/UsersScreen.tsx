@@ -456,7 +456,7 @@ export default function UsersScreen() {
                             onClick={() => select(u.id)}
                             className={`flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors ${
                               current
-                                ? 'bg-[var(--primary-color)]/10'
+                                ? 'bg-[color-mix(in_srgb,var(--primary-color)_10%,transparent)]'
                                 : 'hover:bg-[var(--surface-hover)]'
                             }`}
                           >

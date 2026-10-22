@@ -107,7 +107,7 @@ export default function ProjectImages({
         type="button"
         className={`mt-1 w-full rounded-lg border border-dashed p-4 text-sm transition-colors ${
           over
-            ? 'border-[var(--primary-color)] bg-[var(--primary-color)]/5'
+            ? 'border-[var(--primary-color)] bg-[color-mix(in_srgb,var(--primary-color)_5%,transparent)]'
             : 'border-[var(--surface-border)] text-[var(--text-color-secondary)]'
         } ${room === 0 ? 'cursor-not-allowed opacity-60' : 'hover:border-[var(--primary-color)]'}`}
         disabled={room === 0 || busy}

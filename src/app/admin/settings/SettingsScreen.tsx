@@ -198,6 +198,20 @@ const IDENTITY_LABELS: Record<string, Record<string, string>> = {
   shuftipro: { 'identity.apiKey': 'Secret key' },
 };
 
+/**
+ * An AI setup's server address is read only for a model server of the
+ * operator's own (Ai/AiProviders.cs, `Local`); a hosted provider's address
+ * is fixed. Hidden, not cleared, as with email.
+ */
+const AI_LOCAL_PROVIDERS = ['ollama'];
+const aiFieldShown = (key: string, provider: string | null) =>
+  key !== 'ai.baseUrl' || AI_LOCAL_PROVIDERS.includes(provider?.trim().toLowerCase() || 'gemini');
+
+/** On a server of the operator's own the key is for a gateway in front, and usually blank. */
+const AI_LABELS: Record<string, Record<string, string>> = {
+  ollama: { 'ai.apiKey': 'API key (only if a gateway asks for one)' },
+};
+
 type Me = { email: string; displayName: string; role: string };
 
 async function fetchMe(): Promise<Me | null> {
@@ -919,6 +933,10 @@ export default function SettingsScreen() {
           const verifier = fields.find((f) => mainKey(f.key) === 'identity.provider');
           const identityProvider = verifier ? valueOf(verifier) : null;
           const identityLabels = IDENTITY_LABELS[identityProvider?.trim().toLowerCase() || 'didit'] ?? {};
+          // An AI setup shows its server address only for a server of the operator's own.
+          const aiChoice = fields.find((f) => mainKey(f.key) === 'ai.provider');
+          const aiProvider = aiChoice ? valueOf(aiChoice) : null;
+          const aiLabels = AI_LABELS[aiProvider?.trim().toLowerCase() || 'gemini'] ?? {};
           const cannotRemove = dto?.inUse
             ? `Holds ${dto.inUse} — leave it inactive instead; what is there stays reachable.`
             : null;
@@ -1023,8 +1041,9 @@ export default function SettingsScreen() {
                   {fields
                     .filter((s) => emailFieldShown(mainKey(s.key), emailProvider))
                     .filter((s) => identityFieldShown(mainKey(s.key), identityProvider))
+                    .filter((s) => !aiChoice || aiFieldShown(mainKey(s.key), aiProvider))
                     .map((s) => {
-                      const label = identityLabels[mainKey(s.key)];
+                      const label = identityLabels[mainKey(s.key)] ?? aiLabels[mainKey(s.key)];
                       return renderField(
                         label ? { ...s, label } : s,
                         CUSTOM_PHONE_FIELDS.includes(mainKey(s.key)) && phoneProvider !== 'custom',

@@ -214,6 +214,61 @@ export const lockUser = (id: string, reason: string) =>
 
 export const unlockUser = (id: string) => postJson<AdminUser>(`/api/admin/users/${id}/unlock`, {});
 
+// ------------------------------------------------- Admin → Categories
+
+/** What stores a key: a kind in use can be hidden, not removed. */
+export type CategoryUses = { opportunities: number; profiles: number; projects: number };
+
+export type AdminSubcategory = {
+  key: string;
+  label: string;
+  hidden: boolean;
+  skills: string[];
+  /** Opportunities filed under it, drafts included. */
+  opportunities: number;
+};
+
+export type AdminCategory = {
+  key: string;
+  label: string;
+  hidden: boolean;
+  skills: string[];
+  subcategories: AdminSubcategory[];
+  uses: CategoryUses;
+  /** "Something else": renamed, never removed, hidden, moved or given subcategories. */
+  builtin: boolean;
+  updatedAtUtc: string | null;
+  updatedBy: string | null;
+};
+
+export type CategoryLimits = {
+  maxCategories: number;
+  maxSubcategories: number;
+  maxSkills: number;
+  maxKey: number;
+  maxLabel: number;
+  maxSkillName: number;
+};
+
+/** The whole list, and the version a save names so two administrators cannot overwrite each other unseen. */
+export type AdminCategories = { version: string; categories: AdminCategory[]; limits: CategoryLimits };
+
+export const adminCategoriesQuery = {
+  queryKey: ['admin', 'categories'] as const,
+  queryFn: async (): Promise<AdminCategories> => {
+    const res = await apiFetch('/api/admin/categories');
+    if (!res.ok) throw new Error(`Categories failed (${res.status})`);
+    return res.json();
+  },
+  staleTime: 5_000,
+};
+
+/** Saves the whole list in its new order; a key left out is a removal. */
+export const saveCategories = (body: {
+  version: string;
+  categories: { key: string; label: string; hidden: boolean; skills: string[]; subcategories: { key: string; label: string; hidden: boolean; skills: string[] }[] }[];
+}) => putJson<AdminCategories>('/api/admin/categories', body);
+
 /** Takes an identity verification back: the doors shut again until a new one passes. */
 export const resetVerification = (id: string) =>
   postJson<AdminUser>(`/api/admin/users/${id}/reset-verification`, {});

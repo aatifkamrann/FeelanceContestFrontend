@@ -33,6 +33,7 @@ import {
   aiStatusQuery,
   buildHostQuery,
   categoriesQuery,
+  offered,
   ApiError,
   postJson,
   putJson,
@@ -456,6 +457,12 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
   const defaultDays = branding?.opportunityDefaultDurationDays ?? 14;
   const categories = useMemo(() => taxonomy?.categories ?? [], [taxonomy]);
   const categoryDef = categories.find((c) => c.key === value.category) ?? null;
+  // A retired kind is offered only to the draft that already has it.
+  const offeredCategories = useMemo(() => offered(categories, value.category), [categories, value.category]);
+  const offeredSubcategories = useMemo(
+    () => offered(categoryDef?.subcategories, value.subcategory),
+    [categoryDef, value.subcategory],
+  );
 
 
   const skillVocabulary = useMemo(
@@ -938,6 +945,18 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
                   className="mt-2 w-full font-mono text-sm"
                   placeholder={'## What we need\n\n…\n\n## Definition of done\n\n…'}
                 />
+                {/* Attachments are part of the brief and lock with it. They belong
+                    to a saved draft — files need an opportunity to attach to. */}
+                <div className="mt-4">
+                  {value.id ? (
+                    <BriefAttachments opportunityId={value.id} />
+                  ) : (
+                    <p className="text-sm text-[var(--text-color-secondary)]">
+                      <i className="pi pi-paperclip mr-1" aria-hidden />
+                      Save the draft to attach files — logo masters, sample data, mockups.
+                    </p>
+                  )}
+                </div>
                 {/* The coach reads the whole form, so it is worth a second press
                     once the terms below are filled in; the panel vanishes
                     entirely while AI is switched off. */}
@@ -969,7 +988,7 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
                   <Dropdown
                     inputId="c-category"
                     value={value.category}
-                    options={categories}
+                    options={offeredCategories}
                     optionLabel="label"
                     optionValue="key"
                     placeholder="Pick a category"
@@ -983,18 +1002,18 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
                   <Dropdown
                     inputId="c-subcategory"
                     value={value.subcategory}
-                    options={categoryDef?.subcategories ?? []}
+                    options={offeredSubcategories}
                     optionLabel="label"
                     optionValue="key"
                     placeholder={
                       !categoryDef
                         ? 'Pick a category first'
-                        : categoryDef.subcategories.length === 0
+                        : offeredSubcategories.length === 0
                           ? 'No subcategories'
                           : 'Subcategory (optional)'
                     }
                     showClear
-                    disabled={!categoryDef || categoryDef.subcategories.length === 0}
+                    disabled={!categoryDef || offeredSubcategories.length === 0}
                     onChange={(e) => set('subcategory', e.value ?? null)}
                     className="w-full"
                     aria-label="Subcategory"
@@ -1310,16 +1329,6 @@ export default function OpportunityEditor({ initial }: { initial?: EditorValue }
                     </span>
                   </label>
                 </div>
-              )}
-
-              {/* Attachments belong to a saved draft — files need an opportunity to attach to. */}
-              {value.id ? (
-                <BriefAttachments opportunityId={value.id} />
-              ) : (
-                <p className="text-sm text-[var(--text-color-secondary)]">
-                  <i className="pi pi-paperclip mr-1" aria-hidden />
-                  Save the draft to attach files — logo masters, sample data, mockups.
-                </p>
               )}
             </Panel>
 

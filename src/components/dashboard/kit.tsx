@@ -166,7 +166,7 @@ export function Panel({
 // ----------------------------------------------------------- stat cards
 
 const TONES = {
-  accent: 'bg-[var(--primary-color)]/10 text-[var(--primary-color)]',
+  accent: 'bg-[color-mix(in_srgb,var(--primary-color)_10%,transparent)] text-[var(--primary-color)]',
   ok: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
   warn: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
   danger: 'bg-red-500/10 text-red-600 dark:text-red-400',

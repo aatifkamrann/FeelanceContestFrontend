@@ -24,7 +24,7 @@ import ProjectImages from '@/components/profile/ProjectImages';
 import SummaryNote from '@/components/profile/SummaryNote';
 import { usePortalName } from '@/components/PortalNote';
 import { skillsForCategories } from '@/lib/categorise';
-import { aiStatusQuery, categoriesQuery } from '@/lib/opportunities';
+import { aiStatusQuery, categoriesQuery, offered } from '@/lib/opportunities';
 import {
   AVAILABILITIES,
   LANGUAGE_LEVELS,
@@ -136,11 +136,18 @@ export default function ProfileEditor({
   const { data: taxonomy } = useQuery(categoriesQuery);
   const categories = useMemo(() => taxonomy?.categories ?? [], [taxonomy]);
   const maxSecondary = taxonomy?.maxSecondaryCategories ?? 3;
-  // The same eleven an opportunity is filed under, offered per project as well as
-  // for the member themselves.
-  const categoryOptions = useMemo(
-    () => categories.map((c) => ({ label: c.label, value: c.key })),
-    [categories],
+  // The same list an opportunity is filed under, offered per project as well as
+  // for the member themselves. A retired kind is offered only where it is
+  // already chosen: it stays on what had it, and nothing new picks it.
+  const projectCategoryOptions = (current: string | null) =>
+    offered(categories, current).map((c) => ({ label: c.label, value: c.key }));
+  const primaryOptions = useMemo(
+    () => offered(categories, value.primaryCategory),
+    [categories, value.primaryCategory],
+  );
+  const secondaryOptions = useMemo(
+    () => offered(categories, ...value.secondaryCategories).filter((c) => c.key !== value.primaryCategory),
+    [categories, value.primaryCategory, value.secondaryCategories],
   );
   // Primary first, so what they mainly do leads the names offered below.
   const chosenCategories = useMemo(
@@ -435,7 +442,7 @@ export default function ProfileEditor({
                 <Dropdown
                   inputId="p-category"
                   value={value.primaryCategory}
-                  options={categories}
+                  options={primaryOptions}
                   optionLabel="label"
                   optionValue="key"
                   placeholder="The work you mainly do"
@@ -460,7 +467,7 @@ export default function ProfileEditor({
                   <MultiSelect
                     inputId="p-secondary-categories"
                     value={value.secondaryCategories}
-                    options={categories.filter((c) => c.key !== value.primaryCategory)}
+                    options={secondaryOptions}
                     optionLabel="label"
                     optionValue="key"
                     display="chip"
@@ -808,7 +815,7 @@ export default function ProfileEditor({
                   <Dropdown
                     value={p.category}
                     onChange={(e) => setProject(i, { category: e.value ?? null })}
-                    options={categoryOptions}
+                    options={projectCategoryOptions(p.category)}
                     optionLabel="label"
                     optionValue="value"
                     placeholder="Category"

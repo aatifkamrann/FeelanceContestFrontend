@@ -27,7 +27,6 @@ import {
 import { brandingQuery, PORTAL_NAME, apiFetch, apiUrl } from '@/lib/api';
 import { decideApplication, statusLabel as applicationStatusLabel } from '@/lib/applications';
 import ApplicationsPanel from './ApplicationsPanel';
-import MilestonePayments from './MilestonePayments';
 import {
   aiStatusQuery,
   closesIn,
@@ -66,7 +65,7 @@ export default function OpportunityActions({
   const router = useRouter();
   const queryClient = useQueryClient();
   const { data: me } = useQuery(meQuery);
-  const { data: opportunity } = useQuery({
+  const { data: opportunity, isError: opportunityFailed } = useQuery({
     queryKey: ['opportunity', slug],
     queryFn: async () => {
       const res = await apiFetch(`/api/opportunities/${encodeURIComponent(slug)}`);
@@ -357,9 +356,9 @@ export default function OpportunityActions({
               Everything on this page is open to read. Entering is for members: sign in as a
               freelancer to apply, and the brief&apos;s attached files open at the same time.{' '}
               {repo && upload
-                ? 'You get a private repo and hand files in here; the client only sees your work at the deadline.'
+                ? 'You get a private repo and hand files in here; the client sees a milestone’s files once you claim it, and the rest of your work at the deadline.'
                 : upload
-                  ? 'You hand your files in on this page; the client only sees them at the deadline. No GitHub account needed.'
+                  ? 'You hand your files in on this page; the client sees a milestone’s files once you claim it, and the rest at the deadline. No GitHub account needed.'
                   : 'You get a private repo; the client only sees your code at the deadline.'}
             </>
           ) : (
@@ -380,6 +379,22 @@ export default function OpportunityActions({
         <p className="mt-2 text-center text-xs text-[var(--text-color-secondary)]">
           Joining is free, and either way brings you straight back to this opportunity.
         </p>
+      </Box>
+    );
+  }
+
+  // Until the viewer's own reading of the opportunity lands, nothing below
+  // can tell an owner from any other client — the fall-through would greet
+  // the owner with "Only freelancer accounts can enter". A quiet placeholder
+  // instead; a failed read (null, or an error) still falls through as before.
+  if (opportunity === undefined && !opportunityFailed) {
+    return (
+      <Box>
+        <div className="flex flex-col gap-2" role="status" aria-label="Loading">
+          <span className="h-4 w-2/5 animate-pulse rounded bg-[var(--surface-hover)]" />
+          <span className="h-3 w-full animate-pulse rounded bg-[var(--surface-hover)]" />
+          <span className="h-3 w-4/5 animate-pulse rounded bg-[var(--surface-hover)]" />
+        </div>
       </Box>
     );
   }
@@ -460,8 +475,9 @@ export default function OpportunityActions({
             </p>
           ) : (
             <p className="mt-1 text-sm text-[var(--text-color-secondary)]">
-              Work through the milestones in order. Each one you hand in is reviewed, and the client pays you its
-              amount directly before the next one opens{repo ? '; the repository transfers to them after the last' : ''}.
+              Work through the milestones in order on the Progress board above. Each one you hand in is reviewed
+              there — with the client&rsquo;s remarks, and any advice for the ones ahead — and the client pays you
+              its amount directly before the next one opens{repo ? '; the repository transfers to them after the last' : ''}.
               They read where to pay you from Payout Setup on{' '}
               <Link href="/profile" className="text-[var(--primary-color)]">
                 your profile
@@ -479,7 +495,6 @@ export default function OpportunityActions({
               onClick={() => openChat(opportunity.viewerEntry!.id)}
             />
           )}
-          <MilestonePayments opportunity={opportunity} role="hired" onChanged={refresh} />
           {upload && opportunity.viewerEntry && (
             <EntryUploads
               entryId={opportunity.viewerEntry.id}
@@ -1050,7 +1065,10 @@ function OwnerBox({
         <p className="mt-1 text-sm text-[var(--text-color-secondary)]">
           Published. The brief and terms are locked; entrants and their progress appear
           on the board as {repo && upload ? 'tags and files' : upload ? 'files' : 'tags'} land.
-          {upload && ' You can open their files once the deadline passes.'}
+          {' '}Select a claimed milestone on the board to review it — approve it, or ask for changes with
+          advice; only that entrant reads your words.
+          {upload && ' A milestone’s files open to you once it is claimed; the rest when the deadline passes.'}
+          {repo && ' The code opens when the deadline passes.'}
         </p>
         {/* Open entry means noise arrives with the signal — the scan is
             most useful while entries are still landing. */}
@@ -1163,6 +1181,7 @@ function OwnerBox({
               : connected
                 ? `Every repo is frozen at its final tag and @${me.githubLogin} has read access — review the code in GitHub${upload ? ' and the files below' : ''}, then announce here.`
                 : `Every repo is frozen at its final tag. Connect GitHub to get read access to the code${upload ? '; the files are open to you below' : ''}.`}
+          {' '}You can still review each claimed milestone on the board, with remarks and advice for the entrant.
         </p>
 
         {needsConnect && (
@@ -1379,9 +1398,11 @@ function OwnerBox({
         )}
         {!award.paidAtUtc && (
           <p className="mt-1 text-sm text-[var(--text-color-secondary)]">
-            Each milestone they hand in waits on you: approve it or ask for changes, pay its amount directly, then
-            mark it paid — the next one opens only then.
+            Each milestone they hand in waits on you on the Progress board above: approve it or ask for changes,
+            with remarks and any advice for the milestones ahead; pay its amount directly, then mark it paid — the
+            next one opens only then.
             {repo && connected && ' You can read the repository on GitHub as it grows.'}
+            <HelpIcon topic="opportunity.milestonePayments" label="Milestone payments" />
           </p>
         )}
         {award.winnerUserId && !award.paidAtUtc && (
@@ -1396,7 +1417,6 @@ function OwnerBox({
             <span className="text-[var(--text-color-secondary)]"> — on their profile, shown to you now that you have hired them.</span>
           </p>
         )}
-        <MilestonePayments opportunity={opportunity} role="owner" onChanged={onRefresh} />
         {award.paidAtUtc && (
           <p className="mt-3 text-sm text-[var(--text-color-secondary)]">
             {award.handover === 'verified'

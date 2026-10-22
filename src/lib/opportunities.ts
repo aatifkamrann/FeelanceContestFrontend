@@ -166,6 +166,8 @@ export type OpportunitySubcategoryDef = {
   label: string;
   /** The same kind of list as the category's, narrower — what the opportunity form offers first once it is picked. */
   skills: string[];
+  /** Retired: still the label of what chose it, offered to nothing new. */
+  hidden: boolean;
 };
 export type OpportunityCategoryDef = {
   key: string;
@@ -177,6 +179,8 @@ export type OpportunityCategoryDef = {
    * nothing: an opportunity is not filtered by it and no fit is judged on it.
    */
   skills: string[];
+  /** Retired: still the label of what chose it, offered to nothing new. */
+  hidden: boolean;
 };
 
 /** The taxonomy the form fills from and the browse page filters by — nobody's data. */
@@ -196,8 +200,21 @@ export const categoriesQuery = {
     if (!res.ok) throw new Error('Failed to load categories');
     return res.json();
   },
-  staleTime: Infinity,
+  // An administrator edits the list (Admin → Categories); a tab picks the
+  // change up within five minutes, or at once after that save.
+  staleTime: 5 * 60_000,
 };
+
+/**
+ * What a picker offers: every kind not hidden, plus any hidden one already
+ * chosen — a retired kind stays on what had it and is offered to nothing new.
+ */
+export function offered<T extends { key: string; hidden: boolean }>(
+  list: readonly T[] | undefined,
+  ...chosen: (string | null | undefined)[]
+): T[] {
+  return (list ?? []).filter((x) => !x.hidden || chosen.includes(x.key));
+}
 
 /**
  * How entrants hand work in — the client's choice per opportunity, frozen at
@@ -228,6 +245,18 @@ export type MilestonePayment = {
   ref: string | null;
   changesNote: string | null;
   changesRequestedAtUtc: string | null;
+  /** Every decision on it, oldest first; null for anyone but the owner, an administrator and the hired freelancer. */
+  reviews: MilestoneReview[] | null;
+};
+
+/** One decision on a milestone handed in: approved or sent back, with its remarks and advice. */
+export type MilestoneReview = {
+  decision: 'approved' | 'changes_requested';
+  note: string | null;
+  advice: string | null;
+  /** An administrator decided on the client's behalf. */
+  onBehalf: boolean;
+  atUtc: string;
 };
 
 /** A payment state as a person reads it. */
@@ -363,7 +392,8 @@ export type OpportunityEntrant = {
   filesUploaded: number | null;
   /**
    * The files themselves, when the viewer may open them: the entrant's own
-   * always, an administrator's always, the client's from the deadline on.
+   * always, an administrator's always, the client's from the deadline on —
+   * and before it, the files of the milestones the entrant has claimed.
    */
   files: EntryFile[] | null;
   /** The entrant's portable record — wins anywhere, ratings from clients. */
@@ -384,6 +414,31 @@ export type OpportunityEntrant = {
    * none, pending, starting or running. Null otherwise.
    */
   finalPreview: 'none' | 'pending' | 'starting' | 'running' | null;
+  /**
+   * One per milestone, in order, on a competitive opportunity: each claim's
+   * reviews — on every row for the client and administrators, on their own
+   * row for the entrant. Null for everyone else, and on a job paid by milestone.
+   */
+  reviews?: ClaimReviewCell[] | null;
+};
+
+/** Where one claim stands with its reviewer; "updated" is work landed after a request for changes. */
+export type ClaimReviewState = 'unclaimed' | 'unreviewed' | 'approved' | 'changes_requested' | 'updated';
+
+/** The reviews of one board cell: the claim they answer (null while unclaimed), its state, every decision. */
+export type ClaimReviewCell = {
+  checkpointId: string | null;
+  state: ClaimReviewState;
+  reviews: MilestoneReview[];
+};
+
+/** A claim's review state as a person reads it. */
+export const CLAIM_REVIEW_LABEL: Record<ClaimReviewState, string> = {
+  unclaimed: 'Not claimed yet',
+  unreviewed: 'Not reviewed yet',
+  approved: 'Approved',
+  changes_requested: 'Changes asked for',
+  updated: 'Updated since the request',
 };
 
 /** The build behind one board cell; the checkpoint id is what the log dialog asks about. */
